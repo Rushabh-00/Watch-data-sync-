@@ -75,6 +75,41 @@ class FastrackProtocolTest {
     }
 
     @Test
+    fun observedFt38093WatchFacePacketCannotBecomeDailyActivity() {
+        val packet = byteArrayOf(
+            0x26, 0x01,
+            0x00, 0x6E.toByte(), 0xC3.toByte(), 0x79,
+            0x01, 0x68,
+            0x01, 0x68,
+            0x00,
+            0x00, 0x10, 0x00, 0x00,
+            0x03,
+            0x03,
+            0x00, 0x00,
+            0x00,
+        )
+
+        assertEquals(null, FastrackProtocol().decodeDailyActivity(packet))
+    }
+
+    @Test
+    fun dailyActivityCandidateRequiresExact13ByteShape() {
+        val packet = byteArrayOf(
+            0x26, 0x01,
+            0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(),
+            0x40, 0x01,
+            0x7C.toByte(), 0x01,
+            0x00, 0x10, 0x00,
+        )
+
+        val decoded = FastrackProtocol().decodeDailyActivity(packet)
+
+        assertEquals(320, decoded?.steps)
+        assertEquals(380, decoded?.calories)
+        assertEquals(16, decoded?.activeMinutes)
+    }
+
+    @Test
     fun watchFaceConfig26PacketMatchesObservedFt38093Response() {
         val packet = byteArrayOf(
             0x26, 0x01,
