@@ -115,6 +115,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearCapture() = gattClient.clearCapture()
 
+    fun markCapture(label: String) = gattClient.markCapture(label)
+
     fun disconnect() = gattClient.disconnect()
 
     private companion object {
