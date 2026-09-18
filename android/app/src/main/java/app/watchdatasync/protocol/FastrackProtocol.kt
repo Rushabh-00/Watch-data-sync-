@@ -343,5 +343,6 @@ class FastrackProtocol : WatchProtocol {
         const val CHAR_33F1_UUID = "000033f1-0000-1000-8000-00805f9b34fb"
         const val CHAR_33F2_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
         const val CHAR_34F1_UUID = "000034f1-0000-1000-8000-00805f9b34fb"
+        const val CHAR_34F2_UUID = "000034f2-0000-1000-8000-00805f9b34fb"
     }
 }
