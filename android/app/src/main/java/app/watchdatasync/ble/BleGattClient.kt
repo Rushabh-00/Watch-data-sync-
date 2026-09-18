@@ -13,6 +13,7 @@ import android.os.Looper
 import app.watchdatasync.model.GattCharacteristic
 import app.watchdatasync.model.GattService
 import app.watchdatasync.model.GattValue
+import app.watchdatasync.protocol.FastrackProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,6 +28,8 @@ class BleGattClient(private val context: Context) {
     private var lastDevice: BluetoothDevice? = null
     private var disconnectRequested = false
     private var reconnectAttempt = 0
+    private var matchedVendorProtocol = false
+    private val fastrackProtocol = FastrackProtocol()
 
     private val handler = Handler(Looper.getMainLooper())
     private var operationTimeout: Runnable? = null
@@ -138,6 +141,7 @@ class BleGattClient(private val context: Context) {
         _connected.value = false
         _services.value = emptyList()
         _values.value = emptyList()
+        matchedVendorProtocol = false
     }
 
     @SuppressLint("MissingPermission")
@@ -570,6 +574,27 @@ class BleGattClient(private val context: Context) {
                 }
             }
 
+            val discoveredServiceUuids = gatt.services
+                .map { it.uuid.toString() }
+                .toSet()
+            val discoveredCharacteristicUuids = gatt.services
+                .flatMap { it.characteristics }
+                .map { it.uuid.toString() }
+                .toSet()
+
+            matchedVendorProtocol = fastrackProtocol.matchesGatt(
+                serviceUuids = discoveredServiceUuids,
+                characteristicUuids = discoveredCharacteristicUuids,
+            )
+
+            appendLog(
+                if (matchedVendorProtocol) {
+                    "PROTOCOL Fastrack FT_38093 live channel detected"
+                } else {
+                    "PROTOCOL standard/unknown GATT layout"
+                },
+            )
+
             reconnectAttempt = 0
             _error.value = null
 
@@ -735,13 +760,23 @@ class BleGattClient(private val context: Context) {
             service.characteristics.any { it.uuid == characteristic.uuid }
         }?.uuid?.toString() ?: "unknown"
 
+        val decoded = decodeStandardValue(characteristic.uuid, value)
+            ?: if (matchedVendorProtocol) {
+                fastrackProtocol.decode(
+                    characteristicUuid = characteristic.uuid.toString(),
+                    packet = value,
+                )
+            } else {
+                null
+            }
+
         val item = GattValue(
             serviceUuid = serviceUuid,
             characteristicUuid = characteristic.uuid.toString(),
             timestamp = timestamp(),
             hex = hex(value),
             ascii = ascii(value),
-            decoded = decodeStandardValue(characteristic.uuid, value),
+            decoded = decoded,
         )
 
         val existing = _values.value.filterNot { it.key == item.key }
