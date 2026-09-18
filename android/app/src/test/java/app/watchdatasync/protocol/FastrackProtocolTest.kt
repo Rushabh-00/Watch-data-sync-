@@ -38,10 +38,11 @@ class FastrackProtocolTest {
         val heartRate = commands.first { it.label == "Sync heart-rate history" }
         val spo2 = commands.first { it.label == "Sync SpO₂ history" }
 
-        assertEquals(30_000L, steps.responseTimeoutMs)
+        assertEquals(15_000L, steps.responseTimeoutMs)
         assertEquals(0L, steps.responseQuietWindowMs)
         assertEquals("B2", steps.responsePrefixes.single().toHex())
         assertEquals("B2 FD", steps.completeResponsePrefix!!.toHex())
+        assertEquals(1, steps.retryCount)
 
         assertEquals(15_000L, sleep.responseTimeoutMs)
         assertEquals(0L, sleep.responseQuietWindowMs)
