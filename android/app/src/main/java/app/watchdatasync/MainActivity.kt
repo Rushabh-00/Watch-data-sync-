@@ -632,13 +632,22 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                             Text(service.uuid, fontWeight = FontWeight.Medium)
                             service.characteristics.forEach { characteristic ->
                                 Text(
-                                    characteristic.uuid + " • " +
-                                        characteristic.properties.joinToString(" / "),
+                                    friendlyCharacteristicLabel(characteristic.uuid),
                                     modifier = Modifier.padding(
                                         start = 8.dp,
                                         bottom = 4.dp,
                                     ),
                                     style = MaterialTheme.typography.bodySmall,
+                                )
+                                Text(
+                                    characteristic.uuid + " • " +
+                                        characteristic.properties.joinToString(" / "),
+                                    modifier = Modifier.padding(
+                                        start = 8.dp,
+                                        bottom = 6.dp,
+                                    ),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Divider(Modifier.padding(vertical = 4.dp))
@@ -696,7 +705,7 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                         ) {
                             Text(
-                                value.characteristicUuid,
+                                friendlyCharacteristicLabel(value.characteristicUuid),
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -705,7 +714,7 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Text(
-                                value.decoded ?: "No decoder output",
+                                humanReadableDecode(value),
                                 style = MaterialTheme.typography.bodySmall,
                             )
                             Divider(Modifier.padding(vertical = 5.dp))
@@ -731,33 +740,38 @@ private fun buildDiagnosticsClipboardText(
     logs: List<String>,
 ): String = buildString {
     appendLine("WATCH DATA SYNC DIAGNOSTICS")
-    appendLine("Connected: " + connected)
+    appendLine("Connection: " + if (connected) "CONNECTED" else "DISCONNECTED")
     appendLine()
-    appendLine("SERVICES / CHARACTERISTICS")
+
+    appendLine("HUMAN-READABLE PACKETS")
+    if (values.isEmpty()) {
+        appendLine("No captured packets.")
+    } else {
+        values.forEach { value ->
+            appendLine(humanCaptureLine(value))
+            appendLine("  Raw HEX: " + value.hex)
+            appendLine("  Candidates: " + compactCandidates(value.decoded))
+        }
+    }
+
+    appendLine()
+    appendLine("GATT SERVICES / CHARACTERISTICS")
     services.forEach { service ->
         appendLine(service.uuid)
         service.characteristics.forEach { characteristic ->
             appendLine(
-                "  " + characteristic.uuid + " • " +
-                    characteristic.properties.joinToString(" / "),
+                "  " + friendlyCharacteristicLabel(characteristic.uuid) +
+                    " | " + characteristic.uuid +
+                    " | " + characteristic.properties.joinToString(" / "),
             )
         }
     }
+
     appendLine()
-    appendLine("CAPTURED VALUES (" + values.size + ")")
-    values.forEach { value ->
-        appendLine(
-            value.timestamp + " • " +
-                value.serviceUuid + " • " +
-                value.characteristicUuid + " • HEX=" +
-                value.hex + " • ASCII=" + value.ascii,
-        )
-        appendLine("  DECODER=" + (value.decoded ?: "—"))
-    }
-    appendLine()
-    appendLine("RAW EVENT LOG (" + logs.size + ")")
-    logs.forEach(::appendLine)
+    appendLine("RAW EVENT LOG (" + logs.size + " lines)")
+    logs.forEach { appendLine(it) }
 }
+
 
 @Composable
 private fun ConnectionCard(
@@ -902,6 +916,79 @@ private fun DeviceRow(
                 style = MaterialTheme.typography.labelSmall,
             )
         }
+    }
+}
+
+private fun friendlyCharacteristicLabel(uuid: String): String {
+    val id = uuid.lowercase(Locale.ROOT)
+    return when {
+        id == UUID_VENDOR_HEART_RATE -> "FT_38093 live-data channel (33F2)"
+        id == "000034f2-0000-1000-8000-00805f9b34fb" -> "FT_38093 vendor channel (34F2)"
+        id == "00006002-0000-1000-8000-00805f9b34fb" -> "FT_38093 vendor channel (6002)"
+        id == "00006102-0000-1000-8000-00805f9b34fb" -> "FT_38093 vendor channel (6102)"
+        id == "00006487-3c17-d293-8e48-14fe2e4da212" -> "FT_38093 vendor channel (6487)"
+        id == "0000fd04-0000-1000-8000-00805f9b34fb" -> "FT_38093 vendor channel (FD04)"
+        id == UUID_BATTERY -> "Battery Level (standard BLE; unverified for this watch)"
+        id == UUID_HEART_RATE -> "Heart Rate Measurement (standard BLE)"
+        id == UUID_SPO2 -> "SpO₂ Continuous (standard BLE)"
+        id == "00002a5e-0000-1000-8000-00805f9b34fb" -> "SpO₂ Spot Check (standard BLE)"
+        else -> "BLE characteristic"
+    }
+}
+
+private fun humanReadableDecode(value: GattValue): String {
+    val decoded = value.decoded.orEmpty()
+    return when {
+        decoded.startsWith("Heart rate ") ->
+            "VERIFIED • " + decoded
+        decoded.startsWith("Heart-rate frame ") ->
+            "Known FT_38093 heart-rate frame • " + decoded.removePrefix("Heart-rate frame ")
+        decoded.startsWith("FT_38093 vendor frame") ->
+            "UNIDENTIFIED FT_38093 vendor packet • " + decoded.removePrefix("FT_38093 vendor frame • ")
+        decoded.startsWith("SpO₂ ") ->
+            "Decoded by standard SpO₂ format • " + decoded
+        decoded.isBlank() ->
+            "UNIDENTIFIED PACKET"
+        decoded.startsWith("RAW bytes") ->
+            "UNIDENTIFIED PACKET • " + compactCandidates(decoded)
+        else ->
+            decoded
+    }
+}
+
+private fun compactCandidates(decoded: String?): String {
+    if (decoded.isNullOrBlank()) return "No automatic decoder output"
+
+    val keys = listOf("U8", "S8", "U16LE", "S16LE", "U16BE", "S16BE", "U32LE", "S32LE", "U32BE", "S32BE")
+    val parts = keys.mapNotNull { key ->
+        Regex("\\Q$key=\\E\\[([^]]*)\\]").find(decoded)?.groupValues?.get(1)
+            ?.takeIf { it != "—" }
+            ?.let { key + "=" + it }
+    }
+
+    return if (parts.isEmpty()) {
+        decoded
+    } else {
+        parts.take(6).joinToString(" • ")
+    }
+}
+
+private fun humanCaptureLine(value: GattValue): String {
+    val prefix = value.timestamp + " • " + friendlyCharacteristicLabel(value.characteristicUuid)
+    val decoded = value.decoded.orEmpty()
+
+    return when {
+        decoded.startsWith("Heart rate ") ->
+            prefix + " • VERIFIED ❤️ " + decoded
+        decoded.startsWith("Heart-rate frame ") ->
+            prefix + " • HR FRAME • " + decoded.removePrefix("Heart-rate frame ")
+        decoded.startsWith("FT_38093 vendor frame") ->
+            prefix + " • UNKNOWN VENDOR FRAME • " +
+                decoded.removePrefix("FT_38093 vendor frame • ")
+        decoded.startsWith("SpO₂ ") ->
+            prefix + " • SPO₂ • " + decoded
+        else ->
+            prefix + " • UNKNOWN PACKET • candidates: " + compactCandidates(decoded)
     }
 }
 
