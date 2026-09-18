@@ -1154,17 +1154,22 @@ class BleGattClient(private val context: Context) {
                 }
             }
             0x26 -> {
-                val config = fastrackProtocol.decodeWatchFaceConfig(value)
-                if (config != null) {
-                    appendLog(
-                        "SYNC_DATA watch-face config=" +
-                            config.width + "x" + config.height +
-                            " maxData=" + config.maxDataSize +
-                            " level=" + config.compatibleLevel +
-                            " raw=" + hex(value),
-                    )
+                val activity = fastrackProtocol.decodeDailyActivity(value)
+                if (activity != null) {
+                    decodeDailyActivity(value)
                 } else {
-                    appendLog("SYNC_DATA 26 unverified raw=" + hex(value))
+                    val config = fastrackProtocol.decodeWatchFaceConfig(value)
+                    if (config != null) {
+                        appendLog(
+                            "SYNC_DATA watch-face config=" +
+                                config.width + "x" + config.height +
+                                " maxData=" + config.maxDataSize +
+                                " level=" + config.compatibleLevel +
+                                " raw=" + hex(value),
+                        )
+                    } else {
+                        appendLog("SYNC_DATA 26 unverified raw=" + hex(value))
+                    }
                 }
             }
             0xB1 -> recordStepHistoryPacket(value)
