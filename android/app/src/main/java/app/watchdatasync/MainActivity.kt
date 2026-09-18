@@ -57,6 +57,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.WatchDevice
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -120,12 +122,14 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val values by viewModel.values.collectAsStateWithLifecycle()
     val liveHeartRate by viewModel.liveHeartRate.collectAsStateWithLifecycle()
     val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
+    val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val batteryPercent by viewModel.batteryPercent.collectAsStateWithLifecycle()
+    val lastSyncAt by viewModel.lastSyncAt.collectAsStateWithLifecycle()
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
 
     val permissions = rememberBluetoothPermissions()
     var hasPermissions by remember { mutableStateOf(false) }
-    var syncing by remember { mutableStateOf(false) }
-
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
@@ -141,9 +145,9 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
     }
 
-    LaunchedEffect(hasPermissions, boundWatchName) {
-        if (hasPermissions && boundWatchName != null) {
-            viewModel.autoConnectBoundWatch()
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            viewModel.startAutomaticWatchDiscovery()
         }
     }
 
@@ -155,7 +159,12 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val spo2 = if (connected) latestDecoded(values, UUID_SPO2) ?: "—" else "—"
     // The standard Battery Service value is not authoritative for this watch.
     // Keep it hidden until we observe and verify the FT_38093 battery packet.
-    val battery = "—"
+    val battery = batteryPercent?.let { "$it%" } ?: "—"
+    val steps = dailyActivity?.steps?.toString() ?: "—"
+    val calories = dailyActivity?.calories?.toString() ?: "—"
+    val lastSyncLabel = lastSyncAt?.let {
+        SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(it))
+    } ?: "Never"
 
     LazyColumn(
         modifier = Modifier
@@ -197,9 +206,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 connected = connected,
                 syncing = syncing,
                 onSync = {
-                    syncing = true
-                    viewModel.refreshStandardData()
-                    syncing = false
+                    viewModel.syncNow()
                 },
             )
         }
@@ -255,8 +262,8 @@ private fun HomeScreen(viewModel: MainViewModel) {
                     MetricCard(
                         modifier = Modifier.weight(1f),
                         title = "Steps",
-                        value = "—",
-                        helper = "Watch protocol",
+                        value = steps,
+                        helper = "Synced today",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -273,8 +280,8 @@ private fun HomeScreen(viewModel: MainViewModel) {
                     MetricCard(
                         modifier = Modifier.weight(1f),
                         title = "Calories",
-                        value = "—",
-                        helper = "Watch protocol",
+                        value = calories,
+                        helper = "Synced today",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -309,13 +316,14 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Data availability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Sync status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Heart rate is live from the verified FT_38093 vendor BLE channel and intentionally omitted from diagnostics capture. SpO₂ and battery stay hidden until their watch-specific packets are verified.",
+                        if (syncing) "Syncing heart-rate history and available health data…"
+                        else "Last sync: $lastSyncLabel",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
-                        "Steps, sleep, workouts and historical records need a verified model-specific protocol adapter before the app can decode them correctly.",
+                        "The app connects directly to the FT_38093 BLE GATT service. Android system Bluetooth pairing is not required for the app's sync path.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -335,7 +343,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
             item {
                 EmptyState(
                     title = "Nothing captured yet",
-                    message = "Connect the watch and sync available data.",
+                    message = "The app will discover the FT_38093 watch and sync automatically when connected.",
                 )
             }
         } else {
@@ -355,64 +363,150 @@ private fun HomeScreen(viewModel: MainViewModel) {
 
 @Composable
 private fun HistoryScreen(viewModel: MainViewModel) {
+    val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
+    val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
+    val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
-    var range by remember { mutableIntStateOf(0) }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(
-            text = "History",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "Non-heart-rate capture retained for up to 24 hours",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(14.dp))
-
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            FilterChip(
-                selected = range == 0,
-                onClick = { range = 0 },
-                label = { Text("All") },
+        item {
+            Text(
+                text = "History",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
             )
-            FilterChip(
-                selected = range == 1,
-                onClick = { range = 1 },
-                label = { Text("All captured") },
+            Text(
+                text = "Synced watch history",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
-        Spacer(Modifier.height(14.dp))
-
-        val filtered = values.asReversed().filterNot {
-            isHeartRateCapture(it)
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Today",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Steps",
+                            value = dailyActivity?.steps?.toString() ?: "—",
+                            helper = "Synced",
+                        )
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Calories",
+                            value = dailyActivity?.calories?.toString() ?: "—",
+                            helper = "Synced",
+                        )
+                    }
+                }
+            }
         }
 
-        if (filtered.isEmpty()) {
-            EmptyState(
-                title = "No history yet",
-                message = "Once the watch exposes data, captured records will appear here.",
-            )
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(filtered, key = { it.key }) { value ->
-                    CapturedValueRow(value)
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Heart-rate history",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (heartRateHistory.isEmpty()) {
+                        Text(
+                            "No history synced yet. Keep the watch connected and press Sync now.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        heartRateHistory.asReversed().take(60).forEach { sample ->
+                            Text(
+                                formatHistoryTime(sample.epochMillis) + " • " + sample.bpm + " bpm",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "SpO₂ history",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (spo2History.isEmpty()) {
+                        Text(
+                            "No SpO₂ history returned by the watch yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        spo2History.asReversed().take(60).forEach { sample ->
+                            Text(
+                                formatHistoryTime(sample.epochMillis) + " • " + sample.percent + "%",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        "Protocol discovery",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Unknown FT_38093 vendor packets remain available in Diagnostics for protocol verification.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    values.asReversed()
+                        .filterNot(::isHeartRateCapture)
+                        .take(20)
+                        .forEach { value ->
+                            Text(
+                                value.timestamp + " • " + value.hex,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                 }
             }
         }
     }
 }
+
+private fun formatHistoryTime(epochMillis: Long): String =
+    SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
 
 @Composable
 private fun WatchScreen(viewModel: MainViewModel) {
@@ -450,7 +544,7 @@ private fun WatchScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "FT_38093 only • bound watch reconnects automatically",
+                text = "FT_38093 • direct BLE sync • no OS pairing required",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -497,7 +591,7 @@ private fun WatchScreen(viewModel: MainViewModel) {
                                 }
                             },
                         ) {
-                            Text("Discover watch")
+                            Text("Discover & connect")
                         }
                         if (connected) {
                             OutlinedButton(onClick = viewModel::disconnect) {
@@ -1120,7 +1214,7 @@ private fun DeviceRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                if (device.bonded) "Bonded" else "Not bonded",
+                "BLE compatible • app sync does not require Android pairing",
                 style = MaterialTheme.typography.labelSmall,
             )
         }
