@@ -265,6 +265,24 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         helper = "Standard BLE",
                     )
                 }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    MetricCard(
+                        modifier = Modifier.weight(1f),
+                        title = "Workouts",
+                        value = "—",
+                        helper = "Watch protocol",
+                    )
+                    MetricCard(
+                        modifier = Modifier.weight(1f),
+                        title = "Activity",
+                        value = "—",
+                        helper = "Watch protocol",
+                    )
+                }
             }
         }
 
