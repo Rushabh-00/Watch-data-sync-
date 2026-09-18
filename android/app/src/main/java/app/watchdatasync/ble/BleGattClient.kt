@@ -1424,6 +1424,7 @@ class BleGattClient(private val context: Context) {
         const val CHAR_33F1_UUID = "000033f1-0000-1000-8000-00805f9b34fb"
         const val CHAR_34F1_UUID = "000034f1-0000-1000-8000-00805f9b34fb"
         const val CHAR_34F2_UUID = "000034f2-0000-1000-8000-00805f9b34fb"
+        const val CHAR_33F2_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
         const val SPO2_SPOT_CHECK_UUID = "00002a5e-0000-1000-8000-00805f9b34fb"
         const val SPO2_CONTINUOUS_UUID = "00002a5f-0000-1000-8000-00805f9b34fb"
         const val SERVICE_CHANGED_UUID = "00002a05-0000-1000-8000-00805f9b34fb"
