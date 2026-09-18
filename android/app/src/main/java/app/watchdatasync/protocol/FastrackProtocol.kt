@@ -137,8 +137,9 @@ class FastrackProtocol : WatchProtocol {
                 writeWithoutResponse = false,
                 settleDelayMs = 250L,
                 responseTimeoutMs = 12_000L,
-                responseQuietWindowMs = 3_000L,
+                responseQuietWindowMs = 0L,
                 responsePrefixes = listOf(hex("B2")),
+                completeResponsePrefix = hex("B2 FD"),
             ),
             Command(
                 label = "Sync sleep history",
@@ -158,8 +159,9 @@ class FastrackProtocol : WatchProtocol {
                 writeWithoutResponse = false,
                 settleDelayMs = 250L,
                 responseTimeoutMs = 15_000L,
-                responseQuietWindowMs = 2_000L,
+                responseQuietWindowMs = 0L,
                 responsePrefixes = listOf(hex("F7")),
+                completeResponsePrefix = hex("F7 FD"),
             ),
             Command(
                 label = "Sync SpO₂ history",
