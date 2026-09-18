@@ -45,6 +45,7 @@ class BleGattClient(private val context: Context) {
         Context.MODE_PRIVATE,
     )
     private var operationTimeout: Runnable? = null
+    private var responseQuietRunnable: Runnable? = null
     private var reconnectRunnable: Runnable? = null
     private var capturePersistRunnable: Runnable? = null
 
@@ -67,6 +68,11 @@ class BleGattClient(private val context: Context) {
             val value: ByteArray,
             val writeWithoutResponse: Boolean,
             val settleDelayMs: Long,
+            val label: String,
+            val responseTimeoutMs: Long,
+            val responseQuietWindowMs: Long,
+            val responsePrefixes: List<ByteArray>,
+            val completeResponsePrefix: ByteArray?,
         ) : GattOperation
     }
 
@@ -351,6 +357,10 @@ class BleGattClient(private val context: Context) {
         writeWithoutResponse: Boolean,
         settleDelayMs: Long,
         label: String,
+        responseTimeoutMs: Long = 0L,
+        responseQuietWindowMs: Long = 0L,
+        responsePrefixes: List<ByteArray> = emptyList(),
+        completeResponsePrefix: ByteArray? = null,
     ) {
         if (currentGatt !== gatt) return
         val key = "write:" + characteristic.uuid + ":" + hex(value)
@@ -363,6 +373,11 @@ class BleGattClient(private val context: Context) {
                 value = value,
                 writeWithoutResponse = writeWithoutResponse,
                 settleDelayMs = settleDelayMs,
+                label = label,
+                responseTimeoutMs = responseTimeoutMs,
+                responseQuietWindowMs = responseQuietWindowMs,
+                responsePrefixes = responsePrefixes,
+                completeResponsePrefix = completeResponsePrefix,
             ),
         )
         startNextOperation()
@@ -412,6 +427,10 @@ class BleGattClient(private val context: Context) {
                 writeWithoutResponse = command.writeWithoutResponse || (!supportsWrite && supportsWriteNr),
                 settleDelayMs = command.settleDelayMs,
                 label = command.label,
+                responseTimeoutMs = command.responseTimeoutMs,
+                responseQuietWindowMs = command.responseQuietWindowMs,
+                responsePrefixes = command.responsePrefixes,
+                completeResponsePrefix = command.completeResponsePrefix,
             )
         }
 
@@ -555,19 +574,19 @@ class BleGattClient(private val context: Context) {
                     next.characteristic.value = next.value
                     @Suppress("DEPRECATION")
                     val started = currentGatt.writeCharacteristic(next.characteristic)
-                    val isActivityProbe =
-                        next.value.size >= 2 &&
-                            (next.value[0].toInt() and 0xFF) == 0x26 &&
-                            (next.value[1].toInt() and 0xFF) == 0x01
-                    if (isActivityProbe) {
-                        _activityProbeStatus.value = "26 01 write started • waiting for verified response"
-                    }
                     appendLog(
-                        "WRITE " + next.characteristic.uuid +
+                        "WRITE " + next.label +
+                            " char=" + next.characteristic.uuid +
                             " started=" + started +
                             " type=" + if (next.writeWithoutResponse) "NR" else "R",
                     )
-                    if (!started || next.writeWithoutResponse) finishOperation(key)
+                    if (!started) {
+                        finishOperation(key)
+                    } else if (next.waitsForResponse() && next.writeWithoutResponse) {
+                        beginResponseWait(next)
+                    } else if (next.writeWithoutResponse) {
+                        finishOperation(key)
+                    }
                 }
             }
         } catch (e: SecurityException) {
@@ -582,7 +601,7 @@ class BleGattClient(private val context: Context) {
         }
     }
 
-    private fun startOperationTimeout() {
+    private fun startOperationTimeout(timeoutMs: Long = GATT_OPERATION_TIMEOUT_MS) {
         operationTimeout?.let(handler::removeCallbacks)
 
         val timeout = Runnable {
@@ -593,7 +612,46 @@ class BleGattClient(private val context: Context) {
         }
 
         operationTimeout = timeout
-        handler.postDelayed(timeout, GATT_OPERATION_TIMEOUT_MS)
+        handler.postDelayed(timeout, timeoutMs)
+    }
+
+    private fun beginResponseWait(operation: GattOperation.Write) {
+        if (activeOperation !== operation || !operation.waitsForResponse()) return
+
+        operationTimeout?.let(handler::removeCallbacks)
+        operationTimeout = null
+        responseQuietRunnable?.let(handler::removeCallbacks)
+        responseQuietRunnable = null
+
+        appendLog(
+            "SYNC_WAIT " + operation.label +
+                " timeout=" + operation.responseTimeoutMs + "ms",
+        )
+
+        val timeout = Runnable {
+            if (activeOperation !== operation) return@Runnable
+            appendLog("SYNC_WAIT_TIMEOUT " + operation.label)
+            finishOperation(operationKey(operation))
+        }
+        operationTimeout = timeout
+        handler.postDelayed(timeout, operation.responseTimeoutMs)
+    }
+
+    private fun scheduleResponseQuietFinish(operation: GattOperation.Write) {
+        if (activeOperation !== operation || !operation.waitsForResponse()) return
+        if (operation.responseQuietWindowMs <= 0L) return
+
+        responseQuietRunnable?.let(handler::removeCallbacks)
+        val runnable = Runnable {
+            if (activeOperation !== operation) return@Runnable
+            appendLog(
+                "SYNC_RESPONSE_QUIET " + operation.label +
+                    " window=" + operation.responseQuietWindowMs + "ms",
+            )
+            finishOperation(operationKey(operation))
+        }
+        responseQuietRunnable = runnable
+        handler.postDelayed(runnable, operation.responseQuietWindowMs)
     }
 
     private fun finishOperation(key: String) {
@@ -605,6 +663,8 @@ class BleGattClient(private val context: Context) {
 
         operationTimeout?.let(handler::removeCallbacks)
         operationTimeout = null
+        responseQuietRunnable?.let(handler::removeCallbacks)
+        responseQuietRunnable = null
         activeOperation = null
         queuedOperationKeys.remove(key)
         val delay = when (active) {
@@ -640,6 +700,9 @@ class BleGattClient(private val context: Context) {
         handler.postDelayed(runnable, SYNC_QUIET_AFTER_QUEUE_MS)
     }
 
+    private fun GattOperation.Write.waitsForResponse(): Boolean =
+        responseTimeoutMs > 0L && responsePrefixes.isNotEmpty()
+
     private fun operationKey(operation: GattOperation): String = when (operation) {
         is GattOperation.Read -> "read:" + operation.characteristic.uuid
         is GattOperation.EnableNotification -> "notify:" + operation.characteristic.uuid
@@ -654,6 +717,8 @@ class BleGattClient(private val context: Context) {
         activeOperation = null
         operationQueue.clear()
         queuedOperationKeys.clear()
+        responseQuietRunnable?.let(handler::removeCallbacks)
+        responseQuietRunnable = null
         syncRequested = false
         _syncing.value = false
     }
@@ -913,8 +978,16 @@ class BleGattClient(private val context: Context) {
             if (active is GattOperation.Write &&
                 active.characteristic.uuid == characteristic.uuid
             ) {
-                appendLog("WRITE_RESULT " + characteristic.uuid + " status=" + status)
-                finishOperation(operationKey(active))
+                appendLog(
+                    "WRITE_RESULT " + active.label +
+                        " char=" + characteristic.uuid +
+                        " status=" + status,
+                )
+                if (status == BluetoothGatt.GATT_SUCCESS && active.waitsForResponse()) {
+                    beginResponseWait(active)
+                } else {
+                    finishOperation(operationKey(active))
+                }
             }
         }
 
@@ -1008,7 +1081,11 @@ class BleGattClient(private val context: Context) {
         val decoded = standardDecoded ?: vendorDecoded
 
         if (isHeartRatePacket(characteristic, value, decoded)) {
-            _liveHeartRate.value = extractHeartRate(decoded)
+            val bpm = extractHeartRate(decoded)
+            _liveHeartRate.value = bpm
+            if (bpm != null) {
+                rememberLiveHeartRate(bpm)
+            }
             return
         }
 
@@ -1050,6 +1127,8 @@ class BleGattClient(private val context: Context) {
         )
         if (uuid !in observedVendorNotifyChannels) return
 
+        noteSyncResponse(uuid, value)
+
         when (value[0].toInt() and 0xFF) {
             0xA1 -> {
                 val serial = value.copyOfRange(1, value.size).toString(Charsets.US_ASCII).trimEnd('\u0000', ' ')
@@ -1089,8 +1168,75 @@ class BleGattClient(private val context: Context) {
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
             0x32 -> decodeSleepStage(value)
-            0xCB, 0xB1 -> appendLog("SYNC_DATA passive frame " + hex(value))
+            0xAA, 0xB1 -> appendLog(
+                "SYNC_DATA activity-status candidate raw=" + hex(value),
+            )
+            0xCB -> appendLog("SYNC_DATA passive frame " + hex(value))
         }
+    }
+
+    private fun noteSyncResponse(
+        characteristicUuid: String,
+        value: ByteArray,
+    ) {
+        val active = activeOperation as? GattOperation.Write ?: return
+        if (!active.waitsForResponse()) return
+
+        val expectedNotifyUuid = when (
+            active.characteristic.uuid.toString().lowercase(Locale.ROOT)
+        ) {
+            CHAR_33F1_UUID -> CHAR_33F2_UUID
+            CHAR_34F1_UUID -> CHAR_34F2_UUID
+            else -> return
+        }
+        if (characteristicUuid != expectedNotifyUuid) return
+        if (!active.responsePrefixes.any { startsWithPrefix(value, it) }) return
+
+        operationTimeout?.let(handler::removeCallbacks)
+        operationTimeout = null
+
+        appendLog(
+            "SYNC_RESPONSE " + active.label +
+                " char=" + characteristicUuid +
+                " raw=" + hex(value),
+        )
+
+        if (
+            active.completeResponsePrefix != null &&
+            startsWithPrefix(value, active.completeResponsePrefix)
+        ) {
+            finishOperation(operationKey(active))
+        } else {
+            scheduleResponseQuietFinish(active)
+        }
+    }
+
+    private fun startsWithPrefix(
+        value: ByteArray,
+        prefix: ByteArray,
+    ): Boolean {
+        if (value.size < prefix.size) return false
+        for (index in prefix.indices) {
+            if (value[index] != prefix[index]) return false
+        }
+        return true
+    }
+
+    private fun rememberLiveHeartRate(bpm: Int) {
+        val minuteBucket = (System.currentTimeMillis() / 60_000L) * 60_000L
+        if (_heartRateHistory.value.any { it.epochMillis == minuteBucket }) return
+
+        _heartRateHistory.value = mergeHeartRateHistory(
+            _heartRateHistory.value,
+            listOf(
+                HeartRateHistorySample(
+                    epochMillis = minuteBucket,
+                    bpm = bpm,
+                ),
+            ),
+        )
+        persistHeartRateHistory()
+        appendLog("SYNC_DATA live-heart-rate=" + bpm + " bpm")
     }
 
     private fun recordStepHistoryPacket(value: ByteArray) {
