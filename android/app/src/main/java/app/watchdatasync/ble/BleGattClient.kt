@@ -846,6 +846,28 @@ class BleGattClient(private val context: Context) {
             "—"
         }
 
+        val s32Le = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                val raw =
+                    (value[index].toLong() and 0xFF) or
+                        ((value[index + 1].toLong() and 0xFF) shl 8) or
+                        ((value[index + 2].toLong() and 0xFF) shl 16) or
+                        ((value[index + 3].toLong() and 0xFF) shl 24)
+                raw.toInt().toString()
+            }
+        } else "—"
+
+        val u32Be = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                (
+                    ((value[index].toLong() and 0xFF) shl 24) or
+                        ((value[index + 1].toLong() and 0xFF) shl 16) or
+                        ((value[index + 2].toLong() and 0xFF) shl 8) or
+                        (value[index + 3].toLong() and 0xFF)
+                    ).toString()
+            }
+        } else "—"
+
         val s32Be = if (value.size >= 4) {
             (0 until value.size - 3 step 4).joinToString(", ") { index ->
                 val raw =
