@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-build-${{ github.ref }}
@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
@@ -39,10 +39,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+          packages: "platforms;android-37 build-tools;36.0.0 platform-tools"
+
+      - name: Show Android SDK
+        run: |
+          sdkmanager --list_installed | sed -n '1,120p'
+          echo "ANDROID_HOME=${ANDROID_HOME}"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
           cache-read-only: false
@@ -51,12 +56,32 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: gradle assembleDebug --configuration-cache --build-cache --parallel --stacktrace --console=plain
+        run: gradle assembleDebug --no-daemon --stacktrace --console=plain
 
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: watch-data-sync-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
+      - name: Publish direct APK
+        working-directory: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          NAME="WatchDataSync-debug.apk"
+          test -f "$APK"
+          cp "$APK" "$NAME"
+
+          if gh release view latest >/dev/null 2>&1; then
+            gh release edit latest \
+              --title "Watch Data Sync - Latest APK" \
+              --notes "Latest debug APK from commit ${{ github.sha }}." \
+              --target "${{ github.sha }}"
+            gh release upload latest "$NAME" --clobber
+          else
+            gh release create latest "$NAME" \
+              --title "Watch Data Sync - Latest APK" \
+              --notes "Latest debug APK from commit ${{ github.sha }}." \
+              --prerelease \
+              --target "${{ github.sha }}"
+          fi
+
+          echo "## Direct APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download WatchDataSync-debug.apk](https://github.com/${{ github.repository }}/releases/download/latest/${NAME})" >> "$GITHUB_STEP_SUMMARY"
