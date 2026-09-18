@@ -17,6 +17,7 @@ import app.watchdatasync.model.GattCharacteristic
 import app.watchdatasync.model.GattService
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.HeartRateHistorySample
+import app.watchdatasync.model.SleepStageSample
 import app.watchdatasync.model.Spo2HistorySample
 import app.watchdatasync.protocol.FastrackProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,6 +101,8 @@ class BleGattClient(private val context: Context) {
     val spo2History: StateFlow<List<Spo2HistorySample>> = _spo2History.asStateFlow()
     private val _dailyActivity = MutableStateFlow<DailyActivitySummary?>(null)
     val dailyActivity: StateFlow<DailyActivitySummary?> = _dailyActivity.asStateFlow()
+    private val _sleepHistory = MutableStateFlow<List<SleepStageSample>>(emptyList())
+    val sleepHistory: StateFlow<List<SleepStageSample>> = _sleepHistory.asStateFlow()
     private val _batteryPercent = MutableStateFlow<Int?>(null)
     val batteryPercent: StateFlow<Int?> = _batteryPercent.asStateFlow()
     private val _lastSyncAt = MutableStateFlow<Long?>(null)
@@ -114,6 +117,7 @@ class BleGattClient(private val context: Context) {
         _heartRateHistory.value = loadHeartRateHistory()
         _spo2History.value = loadSpo2History()
         _dailyActivity.value = loadDailyActivity()
+        _sleepHistory.value = loadSleepHistory()
         _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
         _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
     }
@@ -1024,7 +1028,8 @@ class BleGattClient(private val context: Context) {
             }
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
-            0x32, 0xCB, 0xB1, 0xB2 -> appendLog("SYNC_DATA passive frame " + hex(value))
+            0x32 -> decodeSleepStage(value)
+            0xCB, 0xB1, 0xB2 -> appendLog("SYNC_DATA passive frame " + hex(value))
         }
     }
 
@@ -1081,6 +1086,65 @@ class BleGattClient(private val context: Context) {
                 day.toString().padStart(2, '0') + " " +
                 hour.toString().padStart(2, '0') + ":00",
         )
+    }
+
+    private fun decodeSleepStage(value: ByteArray) {
+        if (value.size < 5) return
+        val hour = value[1].toInt() and 0xFF
+        val minute = value[2].toInt() and 0xFF
+        val stage = value[3].toInt() and 0xFF
+        val duration = leU16(value, 4)
+        if (hour !in 0..23 || minute !in 0..59 || stage !in 1..4 || duration <= 0) return
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val sample = SleepStageSample(
+            epochMillis = calendar.timeInMillis,
+            stage = stage,
+            durationMinutes = duration,
+        )
+        _sleepHistory.value = (_sleepHistory.value + sample)
+            .distinctBy { it.epochMillis to it.stage }
+            .sortedBy { it.epochMillis }
+            .takeLast(MAX_SLEEP_HISTORY)
+        persistSleepHistory()
+        appendLog(
+            "SYNC_DATA sleep stage=" + stage +
+                " start=" + String.format(Locale.US, "%02d:%02d", hour, minute) +
+                " duration=" + duration + " min",
+        )
+    }
+
+    private fun persistSleepHistory() {
+        val array = JSONArray()
+        _sleepHistory.value.forEach { item ->
+            array.put(JSONObject().apply {
+                put("time", item.epochMillis)
+                put("stage", item.stage)
+                put("duration", item.durationMinutes)
+            })
+        }
+        dataPrefs.edit().putString(KEY_SLEEP_HISTORY, array.toString()).apply()
+    }
+
+    private fun loadSleepHistory(): List<SleepStageSample> {
+        val raw = dataPrefs.getString(KEY_SLEEP_HISTORY, null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val time = item.optLong("time", 0L)
+                val stage = item.optInt("stage", 0)
+                val duration = item.optInt("duration", 0)
+                if (time > 0L && stage in 1..4 && duration > 0) {
+                    add(SleepStageSample(time, stage, duration))
+                }
+            }
+        }.sortedBy { it.epochMillis }.takeLast(MAX_SLEEP_HISTORY)
     }
 
     private fun leU16(value: ByteArray, offset: Int): Int =
@@ -1412,6 +1476,8 @@ class BleGattClient(private val context: Context) {
         const val SPO2_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
         const val MAX_HEART_RATE_HISTORY = 20_000
         const val MAX_SPO2_HISTORY = 5_000
+        const val KEY_SLEEP_HISTORY = "sleep_history"
+        const val MAX_SLEEP_HISTORY = 2_000
         const val SYNC_COMPLETE_DELAY_MS = 20_000L
         const val SYNC_START_DELAY_MS = 1_000L
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
