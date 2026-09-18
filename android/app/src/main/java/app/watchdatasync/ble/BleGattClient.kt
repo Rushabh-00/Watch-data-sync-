@@ -846,7 +846,42 @@ class BleGattClient(private val context: Context) {
             "—"
         }
 
-        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • S8=[${s8}] • U16LE=[${u16Le}] • S16LE=[${s16Le}] • U16BE=[${u16Be}] • S16BE=[${s16Be}] • U32LE=[${u32Le}] • ASCII=${ascii(value)}"
+        val s32Be = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                val raw =
+                    ((value[index].toLong() and 0xFF) shl 24) or
+                        ((value[index + 1].toLong() and 0xFF) shl 16) or
+                        ((value[index + 2].toLong() and 0xFF) shl 8) or
+                        (value[index + 3].toLong() and 0xFF)
+                raw.toInt().toString()
+            }
+        } else "—"
+
+        val float32Le = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                val raw =
+                    (value[index].toInt() and 0xFF) or
+                        ((value[index + 1].toInt() and 0xFF) shl 8) or
+                        ((value[index + 2].toInt() and 0xFF) shl 16) or
+                        ((value[index + 3].toInt() and 0xFF) shl 24)
+                Float.fromBits(raw).let { if (it.isFinite()) String.format(Locale.US, "%.6f", it) else it.toString() }
+            }
+        } else "—"
+
+        val float32Be = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                val raw =
+                    ((value[index].toInt() and 0xFF) shl 24) or
+                        ((value[index + 1].toInt() and 0xFF) shl 16) or
+                        ((value[index + 2].toInt() and 0xFF) shl 8) or
+                        (value[index + 3].toInt() and 0xFF)
+                Float.fromBits(raw).let { if (it.isFinite()) String.format(Locale.US, "%.6f", it) else it.toString() }
+            }
+        } else "—"
+
+        val bits0 = "%8s".format((value.first().toInt() and 0xFF).toString(2)).replace(" ", "0")
+
+        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • S8=[${s8}] • U16LE=[${u16Le}] • S16LE=[${s16Le}] • U16BE=[${u16Be}] • S16BE=[${s16Be}] • U32LE=[${u32Le}] • S32LE=[${s32Le}] • U32BE=[${u32Be}] • S32BE=[${s32Be}] • F32LE=[${float32Le}] • F32BE=[${float32Be}] • BITS0=${bits0} • ASCII=${ascii(value)}"
     }
 
     private fun decodeStandardValue(
