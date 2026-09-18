@@ -55,7 +55,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.watchdatasync.FastrackFeatureHubScreen
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.WatchDevice
 import kotlinx.coroutines.delay
