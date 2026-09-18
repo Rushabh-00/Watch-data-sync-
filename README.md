@@ -13,6 +13,7 @@ The app is designed to replace the vendor companion app for normal local watch-d
 - Evidence-aware sleep and vendor-history discovery
 - Professional dashboard + History + Watch + More + Diagnostics
 - Sideload-safe distribution flavor without notification-listener declaration
+- v0.5.0 release tested and published by CI
 - Play distribution flavor with notification relay support
 
 ## Evidence status
