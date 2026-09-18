@@ -145,7 +145,7 @@ class BleGattClient(private val context: Context) {
         _stepHistory.value = loadStepHistory()
         _todayStepTotal.value = todaySteps(_stepHistory.value)
         _activityProbeStatus.value =
-            "Daily steps use verified B2 history; 26 01 is watch-face configuration on this firmware"
+            "Daily steps use verified B1/B2 records; 26 01 is watch-face configuration on the observed FT_38093 firmware"
         _sleepHistory.value = loadSleepHistory()
         _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
         _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
@@ -704,9 +704,9 @@ class BleGattClient(private val context: Context) {
             dataPrefs.edit().putLong(KEY_LAST_SYNC, stamp).apply()
             _activityProbeStatus.value =
                 if (_todayStepTotal.value != null) {
-                    "Verified B2 step history • today=" + _todayStepTotal.value + " steps"
+                    "Verified B1/B2 step history • today=" + _todayStepTotal.value + " steps"
                 } else {
-                    "No verified B2 step-history record for today yet"
+                    "No verified B1/B2 step-history record for today yet"
                 }
             appendLog("SYNC_COMPLETE FT_38093")
         }
