@@ -22,7 +22,8 @@ class FastrackProtocolTest {
         assertTrue(payloads.contains("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"))
         assertTrue(payloads.contains("A1"))
         assertTrue(payloads.contains("A2"))
-        assertTrue(payloads.contains("26 01"))
+        assertTrue(payloads.contains("B2 FA"))
+        assertTrue(payloads.contains("31 01"))
         assertTrue(payloads.contains("34 FA"))
         assertTrue(payloads.contains("B2 FA"))
     }
