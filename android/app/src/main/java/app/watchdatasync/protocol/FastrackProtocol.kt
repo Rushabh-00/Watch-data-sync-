@@ -289,8 +289,15 @@ class FastrackProtocol : WatchProtocol {
         )
     }
 
+    /**
+     * Candidate daily-activity format from the matching GloryFit/UTE family.
+     *
+     * Important for FT_38093: the directly observed 0x26 0x01 response is a 20-byte
+     * watch-face configuration packet. Require the documented 13-byte activity shape
+     * so that the watch-face response can never be misread as steps/calories.
+     */
     fun decodeDailyActivity(packet: ByteArray): DailyActivityRecord? {
-        if (packet.size < 13) return null
+        if (packet.size != 13) return null
         if ((packet[0].toInt() and 0xFF) != 0x26 || (packet[1].toInt() and 0xFF) != 0x01) {
             return null
         }
