@@ -15,12 +15,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -51,12 +49,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WatchDataSyncScreen(viewModel: MainViewModel) {
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val connected by viewModel.connected.collectAsStateWithLifecycle()
     val services by viewModel.services.collectAsStateWithLifecycle()
+    val values by viewModel.values.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
 
@@ -90,56 +88,76 @@ private fun WatchDataSyncScreen(viewModel: MainViewModel) {
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Watch Data Sync • BLE lab") })
+            TopAppBar(title = { Text("Watch Data Sync") })
         },
     ) { padding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = if (connected) "Connected — GATT discovered" else "Disconnected",
-                style = MaterialTheme.typography.titleMedium,
-            )
-
-            error?.let { message ->
+            item {
                 Text(
-                    text = message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        if (!hasPermissions) {
-                            permissionLauncher.launch(permissions)
-                        } else {
-                            viewModel.startScan()
-                        }
+                    text = when {
+                        !connected -> "Disconnected"
+                        services.isEmpty() -> "Connected — discovering GATT"
+                        else -> "Connected — GATT ready",
                     },
-                ) {
-                    Text("Scan")
+                    style = MaterialTheme.typography.titleMedium,
+                )
+
+                error?.let { message ->
+                    Text(
+                        text = message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
 
-                Button(
-                    onClick = { viewModel.disconnect() },
-                    enabled = connected,
-                ) {
-                    Text("Disconnect")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            if (!hasPermissions) {
+                                permissionLauncher.launch(permissions)
+                            } else {
+                                viewModel.startScan()
+                            }
+                        },
+                    ) {
+                        Text("Scan")
+                    }
+
+                    Button(
+                        onClick = { viewModel.disconnect() },
+                        enabled = connected,
+                    ) {
+                        Text("Disconnect")
+                    }
+
+                    Button(
+                        onClick = { viewModel.refreshStandardData() },
+                        enabled = connected && services.isNotEmpty(),
+                    ) {
+                        Text("Refresh data")
+                    }
                 }
             }
 
-            Text("Devices", style = MaterialTheme.typography.titleLarge)
+            item {
+                Text("Devices", style = MaterialTheme.typography.titleLarge)
+            }
 
-            LazyColumn(
-                modifier = Modifier.weight(0.9f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
+            if (devices.isEmpty()) {
+                item {
+                    Text(
+                        "No BLE devices discovered yet. Tap Scan.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            } else {
                 items(devices, key = { it.address }) { device ->
                     Column(
                         modifier = Modifier
@@ -148,38 +166,127 @@ private fun WatchDataSyncScreen(viewModel: MainViewModel) {
                             .padding(vertical = 8.dp),
                     ) {
                         Text(device.name, style = MaterialTheme.typography.titleMedium)
-                        Text(device.address + "  RSSI " + device.rssi)
+                        Text(device.address + " • RSSI " + device.rssi)
                         Text(if (device.bonded) "Bonded" else "Not bonded")
                     }
                     HorizontalDivider()
                 }
             }
 
-            Text("GATT services", style = MaterialTheme.typography.titleLarge)
+            item {
+                Text("GATT services", style = MaterialTheme.typography.titleLarge)
+            }
 
-            LazyColumn(
-                modifier = Modifier.weight(0.8f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            if (services.isEmpty()) {
+                item {
+                    Text(
+                        "Connect to the watch to discover services and characteristics.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            } else {
                 items(services, key = { it.uuid }) { service ->
-                    Text("Service " + service.uuid)
-                    service.characteristics.forEach { characteristic ->
-                        Text(
-                            "  " + characteristic.uuid +
-                                " • " + characteristic.properties.joinToString(", "),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Text("Service " + service.uuid, style = MaterialTheme.typography.titleMedium)
+
+                        service.characteristics.forEach { characteristic ->
+                            val canRead = characteristic.properties.contains("READ")
+                            val canNotify =
+                                characteristic.properties.contains("NOTIFY") ||
+                                    characteristic.properties.contains("INDICATE")
+
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 8.dp, top = 6.dp, bottom = 4.dp),
+                            ) {
+                                Text(
+                                    characteristic.uuid,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    characteristic.properties.joinToString(" • "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (canRead) {
+                                        Button(
+                                            onClick = {
+                                                viewModel.readCharacteristic(
+                                                    service.uuid,
+                                                    characteristic.uuid,
+                                                )
+                                            },
+                                        ) {
+                                            Text("Read")
+                                        }
+                                    }
+
+                                    if (canNotify) {
+                                        Button(
+                                            onClick = {
+                                                viewModel.enableNotifications(
+                                                    service.uuid,
+                                                    characteristic.uuid,
+                                                )
+                                            },
+                                        ) {
+                                            Text("Listen")
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    HorizontalDivider()
                 }
             }
 
-            Text("Event log", style = MaterialTheme.typography.titleLarge)
+            item {
+                Text("Watch data", style = MaterialTheme.typography.titleLarge)
+            }
 
-            Text(
-                logs.takeLast(12).joinToString("\n"),
-                style = MaterialTheme.typography.bodySmall,
-            )
+            if (values.isEmpty()) {
+                item {
+                    Text(
+                        "No characteristic values captured yet. Read a characteristic or tap Listen on a notification characteristic.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            } else {
+                items(values.asReversed(), key = { it.key }) { value ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                    ) {
+                        Text(
+                            value.timestamp + " • " + value.characteristicUuid,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        value.decoded?.let {
+                            Text(it, style = MaterialTheme.typography.titleMedium)
+                        }
+                        Text("HEX  " + value.hex, style = MaterialTheme.typography.bodySmall)
+                        Text("TEXT " + value.ascii, style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider()
+                }
+            }
+
+            item {
+                Text("Event log", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    logs.takeLast(20).joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.padding(bottom = 16.dp))
+            }
         }
     }
 }
