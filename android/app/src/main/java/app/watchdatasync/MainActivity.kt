@@ -615,6 +615,97 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
         }
 
         item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Feature capture",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Clear the old packets, mark the feature, then use only that watch feature. " +
+                            "Heart-rate packets stay excluded automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("SpO2")
+                            },
+                            label = { Text("SpO₂") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("Sleep")
+                            },
+                            label = { Text("Sleep") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("Stress") 
+                            },
+                            label = { Text("Stress") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("Steps")
+                            },
+                            label = { Text("Steps") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("Workout")
+                            },
+                            label = { Text("Workout") },
+                        )
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                                viewModel.markCapture("History sync")
+                            },
+                            label = { Text("History") },
+                        )
+                    }
+                    Text(
+                        "Background discovery keeps non-heart-rate packets for the rolling last 24 hours, including after reconnect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        item {
             Card {
                 Column(
                     Modifier.padding(16.dp),
