@@ -118,6 +118,8 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val connected by viewModel.connected.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
+    val liveHeartRate by viewModel.liveHeartRate.collectAsStateWithLifecycle()
+    val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
 
     val permissions = rememberBluetoothPermissions()
@@ -139,10 +141,14 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
     }
 
-    val heartRate = if (connected) {
-        latestDecoded(values, UUID_HEART_RATE)
-            ?: latestDecoded(values, UUID_VENDOR_HEART_RATE)
-            ?: "—"
+    LaunchedEffect(hasPermissions, boundWatchName) {
+        if (hasPermissions && boundWatchName != null) {
+            viewModel.autoConnectBoundWatch()
+        }
+    }
+
+    val heartRate = if (connected && liveHeartRate != null) {
+        liveHeartRate.toString() + " bpm"
     } else {
         "—"
     }
@@ -305,7 +311,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Data availability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Heart rate is live from the verified FT_38093 vendor BLE channel. SpO₂ and battery stay hidden until their watch-specific packets are verified.",
+                        "Heart rate is live from the verified FT_38093 vendor BLE channel and intentionally omitted from diagnostics capture. SpO₂ and battery stay hidden until their watch-specific packets are verified.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
@@ -364,7 +370,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Captured watch data for this sync session",
+            text = "Non-heart-rate capture retained for up to 24 hours",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(14.dp))
@@ -381,25 +387,14 @@ private fun HistoryScreen(viewModel: MainViewModel) {
             FilterChip(
                 selected = range == 1,
                 onClick = { range = 1 },
-                label = { Text("Heart rate") },
-            )
-            FilterChip(
-                selected = range == 2,
-                onClick = { range = 2 },
-                label = { Text("Other") },
+                label = { Text("All captured") },
             )
         }
 
         Spacer(Modifier.height(14.dp))
 
-        val filtered = values.asReversed().filter {
-            when (range) {
-                1 -> it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true) ||
-                    it.characteristicUuid.equals(UUID_VENDOR_HEART_RATE, ignoreCase = true)
-                2 -> !it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true) &&
-                    !it.characteristicUuid.equals(UUID_VENDOR_HEART_RATE, ignoreCase = true)
-                else -> true
-            }
+        val filtered = values.asReversed().filterNot {
+            isHeartRateCapture(it)
         }
 
         if (filtered.isEmpty()) {
@@ -423,6 +418,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
 private fun WatchScreen(viewModel: MainViewModel) {
     val devices by viewModel.devices.collectAsStateWithLifecycle()
     val connected by viewModel.connected.collectAsStateWithLifecycle()
+    val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
 
     val permissions = rememberBluetoothPermissions()
     var hasPermissions by remember { mutableStateOf(false) }
@@ -454,73 +450,81 @@ private fun WatchScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Find and connect to your BLE watch",
+                text = "Only compatible Fastrack watches are shown",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        if (!hasPermissions) {
-                            permissionLauncher.launch(permissions)
-                        } else {
-                            viewModel.startScan()
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+            ) {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        if (boundWatchName != null) "Bound watch" else "No watch bound",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        boundWatchName ?: "Connect your FT_38093 once and the app will reconnect automatically.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (boundWatchName != null) {
+                        Text(
+                            if (connected) "Auto-connected • ready for data"
+                            else "Auto-connect enabled",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (boundWatchName != null) {
+                            OutlinedButton(onClick = viewModel::forgetBoundWatch) {
+                                Text("Forget watch")
+                            }
                         }
-                    },
-                ) {
-                    Text("Scan")
-                }
-
-                OutlinedButton(
-                    onClick = viewModel::stopScan,
-                ) {
-                    Text("Stop")
-                }
-
-                OutlinedButton(
-                    onClick = viewModel::disconnect,
-                    enabled = connected,
-                ) {
-                    Text("Disconnect")
+                        Button(
+                            onClick = {
+                                if (!hasPermissions) {
+                                    permissionLauncher.launch(permissions)
+                                } else {
+                                    viewModel.startScan()
+                                }
+                            },
+                        ) {
+                            Text("Discover watch")
+                        }
+                        if (connected) {
+                            OutlinedButton(onClick = viewModel::disconnect) {
+                                Text("Disconnect")
+                            }
+                        }
+                    }
                 }
             }
         }
 
         item {
-            Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        if (connected) "Connected to watch" else "No watch connected",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "Only connect to the watch you want to inspect or sync.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            Text(
+                "Nearby compatible watches",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
 
         if (devices.isEmpty()) {
             item {
                 EmptyState(
-                    title = "No BLE devices found",
-                    message = "Tap Scan and keep the watch nearby.",
+                    title = "No compatible watch found",
+                    message = "Tap Discover watch and keep the Fastrack nearby.",
                 )
             }
         } else {
-            item {
-                Text(
-                    "Nearby devices",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-
             items(devices, key = { it.address }) { device ->
                 DeviceRow(
                     device = device,
@@ -600,9 +604,9 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                     }
 
                     Text(
-                        "Capture keeps up to 5,000 packets and 5,000 log lines. " +
-                            "Unknown packets are automatically decoded into numeric/text candidates; " +
-                            "metric names are only added when verified.",
+                        "Heart-rate packets are intentionally omitted. " +
+                            "Unknown packets are retained for 24 hours and shown in a human-readable capture view. " +
+                            "Copy log exports the non-heart-rate evidence.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -694,13 +698,14 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Showing latest " + minOf(values.size, 60) + " of " + values.size +
-                            " captured packets.",
+                        "Showing latest " +
+                            minOf(values.count { !isHeartRateCapture(it) }, 60) +
+                            " non-heart-rate packets.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
-                    values.asReversed().take(60).forEach { value ->
+                    values.asReversed().filterNot { isHeartRateCapture(it) }.take(60).forEach { value ->
                         Column(
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                         ) {
@@ -741,17 +746,16 @@ private fun buildDiagnosticsClipboardText(
 ): String = buildString {
     appendLine("WATCH DATA SYNC DIAGNOSTICS")
     appendLine("Connection: " + if (connected) "CONNECTED" else "DISCONNECTED")
+    appendLine("Heart-rate packets: OMITTED (already decoded by the app)")
+    appendLine("Capture retention: last 24 hours")
     appendLine()
 
-    appendLine("HUMAN-READABLE PACKETS")
-    if (values.isEmpty()) {
-        appendLine("No captured packets.")
+    val nonHeartRate = values.filterNot { isHeartRateCapture(it) }
+    appendLine("NON-HEART-RATE CAPTURE (" + nonHeartRate.size + " packets)")
+    if (nonHeartRate.isEmpty()) {
+        appendLine("No non-heart-rate packets captured yet.")
     } else {
-        values.forEach { value ->
-            appendLine(humanCaptureLine(value))
-            appendLine("  Raw HEX: " + value.hex)
-            appendLine("  Candidates: " + compactCandidates(value.decoded))
-        }
+        appendGroupedCaptureLines(nonHeartRate, this)
     }
 
     appendLine()
@@ -769,7 +773,44 @@ private fun buildDiagnosticsClipboardText(
 
     appendLine()
     appendLine("RAW EVENT LOG (" + logs.size + " lines)")
-    logs.forEach { appendLine(it) }
+    logs.filterNot { it.contains(UUID_VENDOR_HEART_RATE, ignoreCase = true) }.forEach(::appendLine)
+}
+
+private fun appendGroupedCaptureLines(
+    values: List<GattValue>,
+    builder: StringBuilder,
+) {
+    var index = 0
+    while (index < values.size) {
+        val current = values[index]
+        var count = 1
+        var last = current
+
+        while (
+            index + count < values.size &&
+            values[index + count].characteristicUuid.equals(
+                current.characteristicUuid,
+                ignoreCase = true,
+            ) &&
+            values[index + count].hex == current.hex
+        ) {
+            last = values[index + count]
+            count++
+        }
+
+        val firstTime = current.timestamp
+        val lastTime = last.timestamp
+        builder.appendLine(
+            firstTime + " → " + lastTime +
+                " • " + friendlyCharacteristicLabel(current.characteristicUuid) +
+                " • x" + count,
+        )
+        builder.appendLine("  HEX: " + current.hex)
+        builder.appendLine("  Decode: " + humanReadableDecode(current))
+        builder.appendLine("  Candidates: " + compactCandidates(current.decoded))
+
+        index += count
+    }
 }
 
 
@@ -918,6 +959,11 @@ private fun DeviceRow(
         }
     }
 }
+
+private fun isHeartRateCapture(value: GattValue): Boolean =
+    value.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true) ||
+        value.characteristicUuid.equals(UUID_VENDOR_HEART_RATE, ignoreCase = true) ||
+        value.hex.uppercase(Locale.ROOT).startsWith("E5 11 00 ")
 
 private fun friendlyCharacteristicLabel(uuid: String): String {
     val id = uuid.lowercase(Locale.ROOT)
