@@ -63,6 +63,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearError() = gattClient.clearError()
 
+    fun clearCapture() = gattClient.clearCapture()
+
     fun disconnect() = gattClient.disconnect()
 
     override fun onCleared() {
