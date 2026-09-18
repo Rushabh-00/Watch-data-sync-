@@ -150,6 +150,86 @@ private fun MiniLineChart(
 }
 
 @Composable
+fun DailyBarChartCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    points: List<Pair<Long, Float>>,
+    barColor: Color,
+    valueLabel: (Float) -> String,
+    emptyMessage: String,
+) {
+    Card(modifier = modifier) {
+        Column(
+            Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            if (points.isEmpty()) {
+                Text(
+                    emptyMessage,
+                    modifier = Modifier.padding(vertical = 18.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val visible = points.takeLast(7)
+                val maxValue = visible.maxOf { it.second }.coerceAtLeast(1f)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    visible.forEach { (time, value) ->
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                valueLabel(value),
+                                style = MaterialTheme.typography.labelSmall,
+                                textAlign = TextAlign.Center,
+                            )
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(110.dp),
+                            ) {
+                                val barHeight = size.height * (value / maxValue)
+                                drawRoundRect(
+                                    color = barColor,
+                                    topLeft = Offset(
+                                        x = size.width * 0.22f,
+                                        y = size.height - barHeight,
+                                    ),
+                                    size = androidx.compose.ui.geometry.Size(
+                                        width = size.width * 0.56f,
+                                        height = barHeight.coerceAtLeast(4f),
+                                    ),
+                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(10f, 10f),
+                                )
+                            }
+                            Text(
+                                SimpleDateFormat("EEE", Locale.US).format(Date(time)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun SleepTrendCard(history: List<SleepStageSample>) {
     Card {
         Column(
@@ -228,7 +308,7 @@ fun SleepTrendCard(history: List<SleepStageSample>) {
 }
 
 private fun formatChartTime(epochMillis: Long): String =
-    SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
+    SimpleDateFormat("dd MMM h:mm a", Locale.US).format(Date(epochMillis))
 
 private fun formatSleepMinutes(minutes: Int): String {
     val hours = minutes / 60
