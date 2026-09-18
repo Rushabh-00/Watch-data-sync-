@@ -133,6 +133,7 @@ class BleGattClient(private val context: Context) {
     private var syncRequested = false
     private var activityProbeResponseReceived = false
     private var sleepSessionDate: Calendar? = null
+    private var autoSyncPending = false
 
     init {
         val persistedCapture = loadPersistedCapture()
@@ -311,18 +312,16 @@ class BleGattClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun enqueueObservedNotifications(currentGatt: BluetoothGatt) {
+        // Enable only notification endpoints that are directly observed for this model.
+        // Enabling every notify/indicate characteristic caused noisy CCCD timeouts and can
+        // touch unrelated vendor channels. Unknown channels remain visible in Diagnostics.
+        val observed = OBSERVED_VENDOR_NOTIFY_CHANNELS +
+            STANDARD_OXIMETER_UUIDS
+
         currentGatt.services.forEach { service ->
             service.characteristics.forEach { characteristic ->
-                if (characteristic.uuid.toString().equals(SERVICE_CHANGED_UUID, ignoreCase = true)) {
-                    return@forEach
-                }
-
-                val supportsNotify =
-                    characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
-                val supportsIndicate =
-                    characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
-
-                if (supportsNotify || supportsIndicate) {
+                val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
+                if (uuid in observed) {
                     enqueueNotification(currentGatt, characteristic)
                 }
             }
@@ -709,8 +708,23 @@ class BleGattClient(private val context: Context) {
         }
         handler.postDelayed({
             startNextOperation()
+            if (activeOperation == null && operationQueue.isEmpty()) {
+                maybeStartPendingAutoSync()
+            }
             scheduleSyncCompletionIfIdle()
         }, delay)
+    }
+
+    private fun maybeStartPendingAutoSync() {
+        if (!autoSyncPending || !matchedVendorProtocol || syncRequested) return
+        if (activeOperation != null || operationQueue.isNotEmpty()) return
+        if (!_connected.value) {
+            autoSyncPending = false
+            return
+        }
+        autoSyncPending = false
+        appendLog("AUTO_SYNC_START after GATT setup settled")
+        syncNow()
     }
 
     private fun scheduleSyncCompletionIfIdle() {
@@ -756,6 +770,7 @@ class BleGattClient(private val context: Context) {
         responseQuietRunnable?.let(handler::removeCallbacks)
         responseQuietRunnable = null
         syncRequested = false
+        autoSyncPending = false
         _syncing.value = false
     }
 
@@ -912,12 +927,13 @@ class BleGattClient(private val context: Context) {
             enqueueStandardCharacteristics(gatt)
             enqueueObservedNotifications(gatt)
 
+            if (matchedVendorProtocol) {
+                autoSyncPending = true
+            }
             handler.postDelayed(
                 {
                     startNextOperation()
-                    if (matchedVendorProtocol) {
-                        handler.postDelayed({ syncNow() }, SYNC_START_DELAY_MS)
-                    }
+                    maybeStartPendingAutoSync()
                 },
                 DISCOVERY_TO_GATT_OPERATION_DELAY_MS,
             )
@@ -1970,7 +1986,6 @@ class BleGattClient(private val context: Context) {
         const val STEP_HISTORY_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
         const val MAX_STEP_HISTORY = 10_000
         const val SYNC_QUIET_AFTER_QUEUE_MS = 3_000L
-        const val SYNC_START_DELAY_MS = 1_000L
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
         const val CAPTURE_PERSIST_DELAY_MS = 2_000L
         const val MAX_CAPTURE_VALUES = 20_000
