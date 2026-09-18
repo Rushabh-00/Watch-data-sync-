@@ -167,23 +167,44 @@ class BleGattClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun refreshStandardData() {
         val currentGatt = gatt ?: return
-        val battery = currentGatt.services
-            .asSequence()
-            .flatMap { it.characteristics.asSequence() }
-            .firstOrNull { it.uuid.toString().equals(BATTERY_LEVEL_UUID, ignoreCase = true) }
 
-        if (battery != null &&
-            battery.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
-        ) {
-            val serviceUuid = currentGatt.services.firstOrNull { service ->
-                service.characteristics.any { it.uuid == battery.uuid }
-            }?.uuid?.toString()
+        refreshStandardCharacteristic(currentGatt, BATTERY_LEVEL_UUID, readIfPossible = true)
+        refreshStandardCharacteristic(currentGatt, HEART_RATE_MEASUREMENT_UUID, readIfPossible = true)
+        refreshStandardCharacteristic(currentGatt, SPO2_CONTINUOUS_UUID, readIfPossible = true)
+        refreshStandardCharacteristic(currentGatt, SPO2_SPOT_CHECK_UUID, readIfPossible = true)
+    }
 
-            if (serviceUuid != null) {
-                readCharacteristic(serviceUuid, battery.uuid.toString())
+    @SuppressLint("MissingPermission")
+    private fun refreshStandardCharacteristic(
+        currentGatt: BluetoothGatt,
+        characteristicUuid: String,
+        readIfPossible: Boolean,
+    ) {
+        val match = currentGatt.services.asSequence()
+            .flatMap { service -> service.characteristics.asSequence().map { service to it } }
+            .firstOrNull { (_, characteristic) ->
+                characteristic.uuid.toString().equals(characteristicUuid, ignoreCase = true)
             }
-        } else {
-            appendLog("STANDARD battery characteristic not found/readable")
+
+        if (match == null) {
+            return
+        }
+
+        val (service, characteristic) = match
+        val serviceUuid = service.uuid.toString()
+
+        if (readIfPossible &&
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
+        ) {
+            readCharacteristic(serviceUuid, characteristic.uuid.toString())
+        }
+
+        val notifyCapable =
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ||
+                characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+
+        if (notifyCapable) {
+            enableNotifications(serviceUuid, characteristic.uuid.toString())
         }
     }
 
@@ -369,6 +390,7 @@ class BleGattClient(private val context: Context) {
 
     private fun decodeStandardValue(uuid: UUID, value: ByteArray): String? {
         val id = uuid.toString().lowercase(Locale.ROOT)
+
         if (id == BATTERY_LEVEL_UUID) {
             return value.firstOrNull()?.let { "Battery " + (it.toInt() and 0xFF) + "%" }
         }
@@ -388,11 +410,53 @@ class BleGattClient(private val context: Context) {
             return "Heart rate " + heartRate + " bpm"
         }
 
+        if (id == SPO2_CONTINUOUS_UUID || id == SPO2_SPOT_CHECK_UUID) {
+            return decodePulseOximeter(value)
+        }
+
         return if (isStandardTextCharacteristic(id)) {
             ascii(value).takeIf { it.isNotBlank() }
         } else {
             null
         }
+    }
+
+    private fun decodePulseOximeter(value: ByteArray): String? {
+        if (value.size < 3) return null
+
+        val flags = value[0].toInt() and 0xFF
+        val firstMeasurement = ieee11073SFloat(
+            value[1].toInt() and 0xFF,
+            value[2].toInt() and 0xFF,
+        ) ?: return null
+
+        val isValid = firstMeasurement.isFinite() && firstMeasurement in 0.0..100.0
+        if (!isValid) return null
+
+        return "SpO₂ " + String.format(Locale.US, "%.0f", firstMeasurement) + "%"
+            .also {
+                appendLog("SPO2 flags=" + flags + " value=" + firstMeasurement)
+            }
+    }
+
+    private fun ieee11073SFloat(low: Int, high: Int): Double? {
+        val raw = (high shl 8) or low
+        val exponent = ((raw shr 12) and 0x0F).let {
+            if (it and 0x08 != 0) it - 16 else it
+        }
+        val mantissaRaw = raw and 0x0FFF
+        val mantissa = if (mantissaRaw and 0x0800 != 0) {
+            mantissaRaw - 0x1000
+        } else {
+            mantissaRaw
+        }
+
+        if (mantissa == 0x07FF) return Double.NaN
+        if (mantissa == 0x0800) return Double.NaN
+        if (mantissa == 0x07FE) return Double.POSITIVE_INFINITY
+        if (mantissa == 0x0802) return Double.NEGATIVE_INFINITY
+
+        return mantissa * Math.pow(10.0, exponent.toDouble())
     }
 
     private fun isStandardTextCharacteristic(uuid: String): Boolean = uuid in setOf(
@@ -440,6 +504,8 @@ class BleGattClient(private val context: Context) {
         const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         const val BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
         const val HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
+        const val SPO2_SPOT_CHECK_UUID = "00002a5e-0000-1000-8000-00805f9b34fb"
+        const val SPO2_CONTINUOUS_UUID = "00002a5f-0000-1000-8000-00805f9b34fb"
 
         const val GATT_CONN_TERMINATE_PEER_USER = 19
         const val GATT_CONN_TERMINATE_LOCAL_HOST = 22
