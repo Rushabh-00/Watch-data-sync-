@@ -60,3 +60,16 @@ Use Diagnostics as a capture lab:
 
 The product UI is now the main app surface. Keep diagnostics available for compatibility work while making the normal user flow:
 Watch connection -> Sync available data -> Today metrics -> History.
+
+
+## FT_38093 sync implementation update
+
+The app now has an automatic FT_38093 sync path on the direct BLE/GATT connection:
+- no Android Bluetooth bonding request is made by the app
+- the remembered watch address is preferred, but target-name discovery can recover after an address changes
+- after FT_38093 GATT verification, the app enables the observed notification channels and runs the verified protocol-family handshake/initialization
+- today's activity summary, watch battery response, heart-rate history, SpO₂ history and step-history requests are persisted for the product UI
+- History now shows synced heart-rate and SpO₂ records instead of only raw discovery captures
+- the normal Home flow auto-discovers the FT_38093 watch and syncs automatically after connection
+- the 14-byte EB 01 ... vendor records observed on 33F2 are retained as protocol evidence but their later fields are still not assigned to sleep/stress semantics without direct evidence
+- sleep/workout/stress semantic decoding remains disabled until a verified request/response mapping is observed for FT_38093
