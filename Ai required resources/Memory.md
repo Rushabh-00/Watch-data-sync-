@@ -173,3 +173,15 @@ Current goal for the next continuation:
 - The related public protocol implementation documents the normal connection preflight as READ `33F1` (feature bitmap) and READ `34F1` (data-channel metadata), followed by history commands. The app previously sent the observed 20-byte read-response values back as writes labelled "Channel 1 handshake" and "Channel 2 init"; this was removed.
 - `main` now performs those two GATT reads as a read-only preflight before the FT_38093 sync command sequence. It still sends the verified time, A1, A2, BB, AA, B2, sleep, F7 and SpO2 operations after the preflight.
 - v0.3.6 is the next hardware-validation build. The critical step evidence remains a real `B2 ...` packet / `B2 FD` completion or a passive `B1 ...` realtime-step packet. No step values, calories or distance are to be fabricated.
+
+
+## Full companion-app feature parity pass — 2026-09-18 22:40 UTC
+
+- v0.4.0 begins the broader Fastrack Smart World parity surface while preserving the protocol safety rules.
+- Added a new Smart Features/More surface covering health, fitness, watch controls, notifications, profile/goals, watch faces and integrations.
+- Added local profile fields (name, height, weight) and local goals (steps, sleep, multisport) as an app-side foundation; watch-side goal/profile writes remain protocol-gated.
+- Added a phone-side Android notification listener bridge that stores only aggregate notification metadata; notification-body persistence is intentionally avoided.
+- Added a local custom-watch-face image selector; installing the image on FT_38093 remains blocked until the exact watch-face transfer protocol is observed.
+- Current verified FT_38093 data path remains live HR, HR history, SpO2 history, battery and time synchronization. Sleep session markers sync; detailed activity/steps/calories/distance, stress, multisport/workout, notification delivery, contacts/call/SMS, weather transfer, media/camera control, alarms, DND/display settings, Health Connect/Google Fit writes and OTA remain capability-gated pending direct FT_38093 evidence.
+- Public Fastrack/Titan companion-app and manual research is being used only to define the feature surface; it is not treated as proof of FT_38093 packet semantics.
+- Latest release before this feature pass: v0.3.9, built successfully in Actions run #223.
