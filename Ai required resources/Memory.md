@@ -77,3 +77,28 @@ The app now has an automatic FT_38093 sync path on the direct BLE/GATT connectio
 - the 14-byte EB 01 ... vendor records observed on 33F2 are retained as protocol evidence but their later fields are still not assigned to steps/stress/workout semantics without direct evidence
 - the verified protocol-family 0x32 sleep-stage response is now decoded and shown in History
 - workout/stress semantic decoding remains disabled until a verified request/response mapping is observed for FT_38093
+
+
+## Latest test results — 2026-09-18 22:05 IST
+
+The latest FT_38093 device test confirms:
+- Live heart rate is displaying correctly in the app.
+- Heart-rate history sync/display is working and appears correct.
+- Battery sync is working; the app showed 26% during the test.
+- SpO₂ sync is working; History showed a synced 18 Sep 18:00 value of 96%.
+- Watch time/date synchronization appears to be working and should remain part of automatic sync.
+- The user wants automatic syncing of sleep history, SpO₂ history and time synchronization to remain part of the normal product flow.
+
+Important data discrepancy found:
+- The watch display showed about 6001 steps and 347 Cal during the test.
+- The app displayed 50030 steps and 377 calories.
+- Therefore the current activity-summary decoding/field offsets or units for steps/calories are not trusted and must be corrected before presenting those values as authoritative.
+- Do not use the current 50030 / 377 values as correct in the product UI.
+- Preserve the raw response bytes used to derive activity totals so the step/calorie field mapping can be rechecked against the watch display.
+- Distance was visible on the watch as 2.29 km, so the activity packet should also be validated against the watch's displayed distance when revisiting the field mapping.
+
+Current goal for the next continuation:
+- Keep the known-good heart rate, heart-rate history, battery, SpO₂ history and time-sync behavior intact.
+- Fix the FT_38093 daily activity decoding so steps, calories and distance match the watch itself.
+- Continue automatic sleep-history synchronization and decoding.
+- Keep the app on main only; do not create/use a dev branch.
