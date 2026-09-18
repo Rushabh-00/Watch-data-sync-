@@ -400,6 +400,14 @@ class BleGattClient(private val context: Context) {
         _error.value = null
         appendLog("SYNC_START FT_38093 automatic health/history sync")
 
+        // The matching protocol-family implementation reads these GATT characteristics before
+        // issuing vendor commands. The previous code mistakenly wrote those read-response bytes
+        // back to the watch as a "handshake". Keep the metadata discovery read-only.
+        appendLog("SYNC_PRECHECK FT_38093 read 33F1 feature metadata")
+        enqueueRead(currentGatt, channel1)
+        appendLog("SYNC_PRECHECK FT_38093 read 34F1 data-channel metadata")
+        enqueueRead(currentGatt, channel2)
+
         val now = Calendar.getInstance()
         val syncCommands = fastrackProtocol.buildAutomaticSyncCommands(now)
         appendLog(
