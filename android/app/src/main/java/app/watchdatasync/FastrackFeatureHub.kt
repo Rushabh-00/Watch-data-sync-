@@ -2,7 +2,12 @@ package app.watchdatasync
 
 import android.content.Context
 import android.content.Intent
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -147,6 +152,51 @@ fun FeatureHubScreen(viewModel: MainViewModel) {
                     }
                     if (goalsOpen) {
                         LocalGoalsEditor(context)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("Phone tools", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Phone-side equivalents for common smartwatch utilities. These do not pretend to be FT_38093 watch commands.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                            context.startActivity(intent)
+                        }) {
+                            Text("Camera")
+                        }
+                        OutlinedButton(onClick = {
+                            val intent = Intent.makeMainSelectorActivity(
+                                Intent.ACTION_MAIN,
+                                Intent.CATEGORY_APP_MUSIC,
+                            )
+                            runCatching { context.startActivity(intent) }
+                        }) {
+                            Text("Music")
+                        }
+                        OutlinedButton(onClick = {
+                            val ringtone = RingtoneManager.getRingtone(
+                                context,
+                                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                            )
+                            ringtone.play()
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                runCatching { ringtone.stop() }
+                            }, 5_000L)
+                        }) {
+                            Text("Find phone")
+                        }
                     }
                 }
             }
