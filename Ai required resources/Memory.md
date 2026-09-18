@@ -112,3 +112,12 @@ Current goal for the next continuation:
 - Existing persisted activity data is invalidated by an activity-decoder schema version, preventing the old 50030/377 values from being shown after upgrade. A new verified `26 01` response must repopulate Today.
 - Sleep: `31 01` produces session/date markers, followed by `0x32` sleep packets on the channel-2 notification path. The observed matching capture shows `0x32` as repeated five-byte records after the opcode: `HH, mm, stage, duration_hi, duration_lo`. The decoder now parses that layout and `31 02` marks transfer completion.
 - The next FT_38093 hardware validation must compare the new `26 01` values with the watch display (target observation was about 6001 steps, 347 Cal, 2.29 km) and confirm that real `0x32` sleep-stage records populate History. Until that hardware run, those target values remain validation targets, not claims of current app output.
+
+
+## FT_38093 hardware test correction — 2026-09-18 18:10 UTC
+
+- The supplied FT_38093 diagnostics from the latest test show the app did **not** emit a `SYNC_QUEUE` or `WRITE` for `26 01`. The actual sync queue in that capture jumps from `AA` to `B2 FA`, then `31 01`, HR history and SpO₂ history.
+- Therefore this test did not exercise the new `26 01` activity probe at all, and the absence of Steps/Calories on History is expected from the captured run. The decoder must not be considered validated from this test.
+- The same capture shows `31 01` session markers for 12–18 Sep followed directly by `31 02`, with no `32` or `CB` sleep-stage/batch packets. Sleep decoding therefore also remains unvalidated on this firmware.
+- v0.3.2 adds explicit `SYNC_PLAN` diagnostics so a hardware run can verify that the activity probe is actually queued before interpreting any response.
+- Do not claim that the watch returned 6001 steps / 347 Cal / 2.29 km over BLE yet. Those remain the watch-display validation targets from the prior observation.

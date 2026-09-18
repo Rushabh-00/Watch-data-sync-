@@ -372,7 +372,13 @@ class BleGattClient(private val context: Context) {
         appendLog("SYNC_START FT_38093 automatic health/history sync")
 
         val now = Calendar.getInstance()
-        fastrackProtocol.buildAutomaticSyncCommands(now).forEach { command ->
+        val syncCommands = fastrackProtocol.buildAutomaticSyncCommands(now)
+        appendLog(
+            "SYNC_PLAN FT_38093 commands=" + syncCommands.size +
+                " activityProbe=" +
+                syncCommands.any { it.payload.contentEquals(byteArrayOf(0x26, 0x01)) },
+        )
+        syncCommands.forEach { command ->
             val characteristic = when (command.characteristicUuid.lowercase(Locale.ROOT)) {
                 CHAR_33F1_UUID -> channel1
                 CHAR_34F1_UUID -> channel2
@@ -396,6 +402,7 @@ class BleGattClient(private val context: Context) {
             )
         }
 
+        appendLog("SYNC_PLAN FT_38093 activity probe queued before step/sleep history")
         syncFinishRunnable?.let(handler::removeCallbacks)
         val runnable = Runnable {
             syncRequested = false
