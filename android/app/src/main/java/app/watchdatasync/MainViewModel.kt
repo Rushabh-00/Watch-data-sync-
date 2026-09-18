@@ -46,6 +46,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         scanner.onCompatibleDeviceFound = { device ->
             if (automaticDiscoveryEnabled && !connected.value) {
+                automaticDiscoveryEnabled = false
+                scanner.stop()
                 connect(device.address)
             }
         }
