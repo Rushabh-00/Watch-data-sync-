@@ -780,8 +780,7 @@ class BleGattClient(private val context: Context) {
             decoded = decoded,
         )
 
-        val existing = _values.value.filterNot { it.key == item.key }
-        _values.value = (existing + item).takeLast(120)
+        _values.value = (_values.value + item).takeLast(MAX_CAPTURED_VALUES)
 
         appendLog(
             source + " " + characteristic.uuid +
@@ -794,6 +793,7 @@ class BleGattClient(private val context: Context) {
         if (value.isEmpty()) return "RAW bytes[0]"
 
         val u8 = value.joinToString(", ") { (it.toInt() and 0xFF).toString() }
+        val s8 = value.joinToString(", ") { it.toInt().toString() }
         val u16Le = if (value.size >= 2) {
             (0 until value.size - 1 step 2).joinToString(", ") { index ->
                 (
@@ -804,6 +804,15 @@ class BleGattClient(private val context: Context) {
         } else {
             "—"
         }
+        val s16Le = if (value.size >= 2) {
+            (0 until value.size - 1 step 2).joinToString(", ") { index ->
+                val raw =
+                    (value[index].toInt() and 0xFF) or
+                        ((value[index + 1].toInt() and 0xFF) shl 8)
+                raw.toShort().toString()
+            }
+        } else "—"
+
         val u16Be = if (value.size >= 2) {
             (0 until value.size - 1 step 2).joinToString(", ") { index ->
                 (
@@ -814,6 +823,15 @@ class BleGattClient(private val context: Context) {
         } else {
             "—"
         }
+
+        val s16Be = if (value.size >= 2) {
+            (0 until value.size - 1 step 2).joinToString(", ") { index ->
+                val raw =
+                    ((value[index].toInt() and 0xFF) shl 8) or
+                        (value[index + 1].toInt() and 0xFF)
+                raw.toShort().toString()
+            }
+        } else "—"
 
         val u32Le = if (value.size >= 4) {
             (0 until value.size - 3 step 4).joinToString(", ") { index ->
@@ -828,7 +846,7 @@ class BleGattClient(private val context: Context) {
             "—"
         }
 
-        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • U16LE=[${u16Le}] • U16BE=[${u16Be}] • U32LE=[${u32Le}] • ASCII=${ascii(value)}"
+        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • S8=[${s8}] • U16LE=[${u16Le}] • S16LE=[${s16Le}] • U16BE=[${u16Be}] • S16BE=[${s16Be}] • U32LE=[${u32Le}] • ASCII=${ascii(value)}"
     }
 
     private fun decodeStandardValue(
@@ -957,7 +975,7 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun appendLog(line: String) {
-        _logs.value = (_logs.value + line).takeLast(500)
+        _logs.value = (_logs.value + line).takeLast(MAX_CAPTURED_LOGS)
     }
 
     private companion object {
