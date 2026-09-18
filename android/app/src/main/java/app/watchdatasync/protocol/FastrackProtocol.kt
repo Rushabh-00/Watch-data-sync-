@@ -80,21 +80,9 @@ class FastrackProtocol : WatchProtocol {
             add(Calendar.DAY_OF_YEAR, -7)
         }
 
+        // 33F1/34F1 feature/channel metadata are read directly by the BLE transport before this command list.
+        // Do not write the read-response bytes back to the watch.
         return listOf(
-            Command(
-                label = "Channel 1 handshake",
-                characteristicUuid = CHAR_33F1_UUID,
-                payload = hex("08 08 44 2A 01 24 39 43 75 6F FF FE D9 21 00 5F 78 4B E1 DC"),
-                writeWithoutResponse = false,
-                settleDelayMs = 700L,
-            ),
-            Command(
-                label = "Channel 2 init",
-                characteristicUuid = CHAR_34F1_UUID,
-                payload = hex("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"),
-                writeWithoutResponse = true,
-                settleDelayMs = 700L,
-            ),
             Command(
                 label = "Sync watch clock",
                 characteristicUuid = CHAR_33F1_UUID,
