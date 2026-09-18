@@ -180,6 +180,10 @@ class FastrackProtocol : WatchProtocol {
 
         val b0 = packet[0].toInt() and 0xFF
 
+        VendorHistoryProtocol.decode(packet)?.let { structured ->
+            return VendorHistoryProtocol.describe(structured)
+        }
+
         if (
             packet.size >= 4 &&
             b0 == 0xE5 &&
