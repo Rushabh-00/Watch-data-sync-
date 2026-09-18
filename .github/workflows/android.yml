@@ -15,7 +15,6 @@ concurrency:
 
 env:
   GRADLE_VERSION: '9.6.0'
-  ANDROID_BUILD_TOOLS: '37.0.0'
 
 jobs:
   release:
@@ -55,11 +54,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build release APK
-        working-directory: android
-        run: gradle assembleRelease --configuration-cache --build-cache --parallel
-
-      - name: Sign release APK
+      - name: Prepare signing keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -68,37 +63,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           test -n "$KEYSTORE_B64"
           test -n "$KEYSTORE_PASSWORD"
           test -n "$KEY_ALIAS"
           test -n "$KEY_PASSWORD"
 
           KEYSTORE="$RUNNER_TEMP/watch-data-sync-release.jks"
-          UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
-          ALIGNED="$RUNNER_TEMP/watch-data-sync-aligned.apk"
-          APK="WatchDataSync-v${{ steps.version.outputs.version }}.apk"
-
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
 
-          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/zipalign" -p 4 "$UNSIGNED" "$ALIGNED"
+          echo "ANDROID_KEYSTORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
 
-          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/apksigner" sign \
-            --ks "$KEYSTORE" \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" \
-            --ks-key-alias "$KEY_ALIAS" \
-            --key-pass pass:"$KEY_PASSWORD" \
-            --out "$APK" \
-            "$ALIGNED"
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        run: gradle assembleRelease --build-cache --parallel
 
-          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/apksigner" verify --verbose "$APK"
-          echo "apk=$APK" >> "$GITHUB_ENV"
+      - name: Prepare APK
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="android/app/build/outputs/apk/release/app-release.apk"
+          DEST="WatchDataSync-v${{ steps.version.outputs.version }}.apk"
+          test -f "$SOURCE"
+          cp "$SOURCE" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+
+      - name: Verify APK signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          "$APKSIGNER" verify --verbose "${{ steps.apk.outputs.path }}"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: WatchDataSync-v${{ steps.version.outputs.version }}
-          path: WatchDataSync-v${{ steps.version.outputs.version }}.apk
+          path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 7
 
@@ -106,16 +112,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          APK: ${{ steps.apk.outputs.path }}
         shell: bash
         run: |
           set -euo pipefail
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$apk#WatchDataSync-$TAG.apk" --clobber
+            gh release upload "$TAG" "$APK#WatchDataSync-$TAG.apk" --clobber
           else
-            gh release create "$TAG" "$apk#WatchDataSync-$TAG.apk" \
+            gh release create "$TAG" "$APK#WatchDataSync-$TAG.apk" \
               --title "Watch Data Sync $TAG" \
+              --target "$GITHUB_SHA" \
               --generate-notes
           fi
 
-          echo "Release: https://github.com/${{ github.repository }}/releases/tag/$TAG"
+          gh release view "$TAG" --json url,name
