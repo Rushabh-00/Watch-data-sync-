@@ -41,9 +41,12 @@ jobs:
         with:
           packages: "platforms;android-36 build-tools;36.0.0 platform-tools"
 
-      - name: Show Android SDK
+      - name: Install Android 37 SDK
         run: |
-          sdkmanager --list_installed | sed -n '1,120p'
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" || \
+            sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
+          sdkmanager --list_installed | sed -n '1,160p'
           echo "ANDROID_HOME=${ANDROID_HOME}"
 
       - name: Set up Gradle
@@ -96,23 +99,16 @@ jobs:
           test -f "$APK"
           cp "$APK" "$NAME"
 
-          if gh release view latest >/dev/null 2>&1; then
-            gh release edit latest \
-              --title "Watch Data Sync - Latest APK" \
-              --notes "Latest debug APK from commit ${{ github.sha }}." \
-              --target "${{ github.sha }}"
-            gh release upload latest "$NAME" --clobber
-          else
-            gh release create latest "$NAME" \
-              --title "Watch Data Sync - Latest APK" \
-              --notes "Latest debug APK from commit ${{ github.sha }}." \
-              --prerelease \
-              --target "${{ github.sha }}"
-          fi
+          TAG="v0.2.0-build-${{ github.run_number }}"
+          gh release create "$TAG" "$NAME" \
+            --title "Watch Data Sync - Build ${{ github.run_number }}" \
+            --notes "Debug APK built from commit ${{ github.sha }}." \
+            --target "${{ github.sha }}"
 
+          
           echo "## Direct APK" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download WatchDataSync-debug.apk](https://github.com/${{ github.repository }}/releases/download/latest/${NAME})" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download WatchDataSync-debug.apk](https://github.com/${{ github.repository }}/releases/latest/download/${NAME})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail workflow after build failure
         if: steps.build.outcome == 'failure'
