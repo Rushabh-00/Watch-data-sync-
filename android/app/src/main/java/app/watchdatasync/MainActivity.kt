@@ -123,6 +123,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val liveHeartRate by viewModel.liveHeartRate.collectAsStateWithLifecycle()
     val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
     val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val batteryPercent by viewModel.batteryPercent.collectAsStateWithLifecycle()
     val lastSyncAt by viewModel.lastSyncAt.collectAsStateWithLifecycle()
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
@@ -268,8 +269,8 @@ private fun HomeScreen(viewModel: MainViewModel) {
                     MetricCard(
                         modifier = Modifier.weight(1f),
                         title = "Sleep",
-                        value = "—",
-                        helper = "Watch protocol",
+                        value = sleepSummary(sleepHistory),
+                        helper = "Synced history",
                     )
                 }
 
@@ -481,6 +482,36 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
+                        "Sleep history",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (sleepHistory.isEmpty()) {
+                        Text(
+                            "No sleep stage records returned by the watch yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        sleepHistory.asReversed().take(30).forEach { sample ->
+                            Text(
+                                formatHistoryTime(sample.epochMillis) + " • " +
+                                    sleepStageLabel(sample.stage) + " • " +
+                                    sample.durationMinutes + " min",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
                         "Protocol discovery",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -507,6 +538,22 @@ private fun HistoryScreen(viewModel: MainViewModel) {
 
 private fun formatHistoryTime(epochMillis: Long): String =
     SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
+
+private fun sleepStageLabel(stage: Int): String = when (stage) {
+    1 -> "Light sleep"
+    2 -> "Deep sleep"
+    3 -> "REM"
+    4 -> "Awake"
+    else -> "Sleep"
+}
+
+private fun sleepSummary(history: List<app.watchdatasync.model.SleepStageSample>): String {
+    if (history.isEmpty()) return "—"
+    val minutes = history.sumOf { if (it.stage in 1..3) it.durationMinutes else 0 }
+    val hours = minutes / 60
+    val mins = minutes % 60
+    return "%dh %02dm".format(Locale.US, hours, mins)
+}
 
 @Composable
 private fun WatchScreen(viewModel: MainViewModel) {
