@@ -896,6 +896,8 @@ private fun humanReadableLogLine(line: String): String {
             "Read requested • " + line.substringAfter("READ ")
         line.startsWith("READ_RESULT ") ->
             "Read result • " + line.removePrefix("READ_RESULT ")
+        line.startsWith("TEST_MARKER ") ->
+            "Test started • " + line.removePrefix("TEST_MARKER ")
         else ->
             line
     }
