@@ -1156,6 +1156,7 @@ class BleGattClient(private val context: Context) {
                     appendLog("SYNC_DATA 26 unverified raw=" + hex(value))
                 }
             }
+            0xB1 -> recordStepHistoryPacket(value)
             0xB2 -> recordStepHistoryPacket(value)
             0x31 -> {
                 if (value.size >= 2 && (value[1].toInt() and 0xFF) == 0x02) {
@@ -1182,14 +1183,14 @@ class BleGattClient(private val context: Context) {
         val active = activeOperation as? GattOperation.Write ?: return
         if (!active.waitsForResponse()) return
 
-        val expectedNotifyUuid = when (
+        val expectedNotifyUuids = when (
             active.characteristic.uuid.toString().lowercase(Locale.ROOT)
         ) {
-            CHAR_33F1_UUID -> CHAR_33F2_UUID
-            CHAR_34F1_UUID -> CHAR_34F2_UUID
+            CHAR_33F1_UUID -> setOf(CHAR_33F2_UUID)
+            CHAR_34F1_UUID -> setOf(CHAR_33F2_UUID, CHAR_34F2_UUID)
             else -> return
         }
-        if (characteristicUuid != expectedNotifyUuid) return
+        if (characteristicUuid !in expectedNotifyUuids) return
         if (!active.responsePrefixes.any { startsWithPrefix(value, it) }) return
 
         operationTimeout?.let(handler::removeCallbacks)
@@ -1240,8 +1241,23 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun recordStepHistoryPacket(value: ByteArray) {
+        val opcode = value.getOrNull(0)?.toInt()?.and(0xFF) ?: return
+        val label = if (opcode == 0xB1) "realtime-step" else "step-history"
+
+        if (
+            value.size == 3 &&
+            (value[1].toInt() and 0xFF) == 0xFD
+        ) {
+            appendLog(
+                "SYNC_DATA " + label + " complete count=" +
+                    (value[2].toInt() and 0xFF) +
+                    " raw=" + hex(value),
+            )
+            return
+        }
+
         if (value.size != 18) {
-            appendLog("SYNC_DATA step-history raw=" + hex(value))
+            appendLog("SYNC_DATA " + label + " raw=" + hex(value))
             return
         }
 
@@ -1275,7 +1291,7 @@ class BleGattClient(private val context: Context) {
         persistStepHistory()
 
         appendLog(
-            "SYNC_DATA step-history date=" + year + "-" + month + "-" + day +
+            "SYNC_DATA " + label + " date=" + year + "-" + month + "-" + day +
                 " hour=" + hour + " steps=" + totalSteps +
                 " raw=" + hex(value),
         )
