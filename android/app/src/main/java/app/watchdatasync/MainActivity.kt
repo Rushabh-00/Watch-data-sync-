@@ -557,14 +557,20 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Steps",
-                            value = todayStepTotal?.toString() ?: "—",
-                            helper = if (todayStepTotal != null) "B2 history" else "Awaiting B2 history",
+                            value = todayStepTotal?.toString()
+                                ?: todayActivity?.steps?.toString()
+                                ?: "—",
+                            helper = when {
+                                todayStepTotal != null -> "Verified B1/B2 history"
+                                todayActivity != null -> "Verified activity packet"
+                                else -> "Awaiting step packet"
+                            },
                         )
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Calories",
-                            value = "—",
-                            helper = "No verified daily calorie field",
+                            value = todayActivity?.calories?.toString() ?: "—",
+                            helper = if (todayActivity != null) "Verified activity packet" else "Awaiting activity packet",
                         )
                     }
                 }
@@ -589,14 +595,14 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Distance",
-                            value = "—",
-                            helper = "No verified daily distance packet",
+                            value = todayActivity?.distanceMeters?.let(::formatDistanceMeters) ?: "—",
+                            helper = if (todayActivity != null) "Verified activity packet" else "Awaiting activity packet",
                         )
                         MetricCard(
                             modifier = Modifier.weight(1f),
-                            title = "Calories",
-                            value = "—",
-                            helper = "No verified daily calorie packet",
+                            title = "Active time",
+                            value = todayActivity?.activeMinutes?.let { it.toString() + " min" } ?: "—",
+                            helper = if (todayActivity != null) "Verified activity packet" else "Awaiting activity packet",
                         )
                     }
                     Text(
