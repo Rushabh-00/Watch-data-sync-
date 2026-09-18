@@ -130,3 +130,9 @@ Current goal for the next continuation:
 - Vendor response parsing is allowed on the observed FT_38093 notification channels (33F2, 34F2, 6002, 6102, FD04 and 6487) without assigning those channels new semantics. A valid packet is still accepted only when it matches the already-tested `26 01` activity layout.
 - History UI is upgraded with verified Today cards, HR/SpO₂ trend charts, sleep-stage visualization, data-integrity status and a Sync Now action. Chart data is drawn from records already persisted by the app; no synthetic values are introduced.
 - Version 0.3.3 is the next validation build. After installation, the critical hardware evidence is a `SYNC_DATA activity=` line with actual 26 01 response bytes followed by Today showing the same watch values.
+
+## Build validation correction — 2026-09-18 18:26 UTC
+
+- v0.3.3 first CI compile attempt reached the Kotlin compile stage but failed only on the new chart file import: Compose `Stroke` must come from `ui.graphics.drawscope`.
+- No protocol test failure was reported before compilation stopped. The import is corrected on main before the next build run.
+- The GATT queue cleanup also now clears the sync-in-progress state when a connection is dropped, avoiding a stale Syncing UI state after disconnect/reconnect.

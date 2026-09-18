@@ -648,9 +648,13 @@ class BleGattClient(private val context: Context) {
     private fun clearOperationQueue() {
         operationTimeout?.let(handler::removeCallbacks)
         operationTimeout = null
+        syncFinishRunnable?.let(handler::removeCallbacks)
+        syncFinishRunnable = null
         activeOperation = null
         operationQueue.clear()
         queuedOperationKeys.clear()
+        syncRequested = false
+        _syncing.value = false
     }
 
     private val callback = object : BluetoothGattCallback() {
