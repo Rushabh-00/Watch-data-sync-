@@ -541,6 +541,21 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(
+                    onClick = viewModel::clearCapture,
+                ) {
+                    Text("Clear capture")
+                }
+                Text(
+                    "Clear old packets before testing a new measurement. Unknown packets use generic byte decoding only; no metric label is guessed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        item {
             Text(
                 text = "Diagnostics",
                 style = MaterialTheme.typography.headlineMedium,
