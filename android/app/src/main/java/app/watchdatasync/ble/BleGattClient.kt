@@ -786,7 +786,7 @@ class BleGattClient(private val context: Context) {
 
         val decoded = standardDecoded ?: vendorDecoded
 
-        if (isHeartRatePacket(characteristic.uuid, value, decoded)) {
+        if (isHeartRatePacket(characteristic, value, decoded)) {
             _liveHeartRate.value = extractHeartRate(decoded)
             return
         }
