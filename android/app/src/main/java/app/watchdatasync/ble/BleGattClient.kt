@@ -153,6 +153,7 @@ class BleGattClient(private val context: Context) {
 
         _connected.value = false
         _services.value = emptyList()
+        _liveHeartRate.value = null
         matchedVendorProtocol = false
     }
 
@@ -518,6 +519,7 @@ class BleGattClient(private val context: Context) {
             disconnectRequested = false
             _connected.value = false
             _services.value = emptyList()
+            _liveHeartRate.value = null
             clearOperationQueue()
             runCatching { gatt.close() }
 
