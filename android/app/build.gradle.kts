@@ -11,12 +11,26 @@ android {
         applicationId = "app.watchdatasync"
         minSdk = 26
         targetSdk = 37
-        versionCode = 13
-        versionName = "0.4.1"
+        versionCode = 14
+        versionName = "0.4.2"
     }
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    flavorDimensions += "distribution"
+
+    productFlavors {
+        create("sideload") {
+            dimension = "distribution"
+            buildConfigField("boolean", "NOTIFICATION_BRIDGE_AVAILABLE", "false")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "NOTIFICATION_BRIDGE_AVAILABLE", "true")
+        }
     }
 
     buildTypes {
