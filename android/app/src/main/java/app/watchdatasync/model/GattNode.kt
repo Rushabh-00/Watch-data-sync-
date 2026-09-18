@@ -17,7 +17,8 @@ data class GattValue(
     val hex: String,
     val ascii: String,
     val decoded: String?,
+    val capturedAt: Long = System.currentTimeMillis(),
 ) {
     val key: String
-        get() = serviceUuid + "/" + characteristicUuid + "/" + timestamp + "/" + hex
+        get() = serviceUuid + "/" + characteristicUuid + "/" + capturedAt + "/" + hex
 }
