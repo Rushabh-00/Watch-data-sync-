@@ -95,6 +95,13 @@ class FastrackProtocol : WatchProtocol {
                 settleDelayMs = 600L,
             ),
             Command(
+                label = "Query step and sleep status",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("AA"),
+                writeWithoutResponse = false,
+                settleDelayMs = 700L,
+            ),
+            Command(
                 label = "Sync step history",
                 characteristicUuid = CHAR_33F1_UUID,
                 payload = hex("B2 FA"),
