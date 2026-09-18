@@ -162,7 +162,9 @@ private fun HomeScreen(viewModel: MainViewModel) {
     // Keep it hidden until we observe and verify the FT_38093 battery packet.
     val battery = batteryPercent?.let { "$it%" } ?: "—"
     val steps = dailyActivity?.steps?.toString() ?: "—"
-    val calories = dailyActivity?.calories?.toString() ?: "—"
+    val calories = dailyActivity?.calories
+        ?.takeIf { it > 0 }
+        ?.toString() ?: "—"
     val lastSyncLabel = lastSyncAt?.let {
         SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(it))
     } ?: "Never"
@@ -264,7 +266,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Steps",
                         value = steps,
-                        helper = "Synced today",
+                        helper = "Watch reported",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
