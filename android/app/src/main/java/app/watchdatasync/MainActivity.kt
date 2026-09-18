@@ -401,29 +401,27 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
 
         item {
-            Row(
+            DailyBarChartCard(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                DailyBarChartCard(
-                    modifier = Modifier.weight(1f),
-                    title = "Steps by day",
-                    subtitle = "Latest 7 days",
-                    points = dailySteps,
-                    barColor = MaterialTheme.colorScheme.primary,
-                    valueLabel = { String.format(Locale.US, "%.0f", it) },
-                    emptyMessage = "No verified daily step history yet.",
-                )
-                DailyBarChartCard(
-                    modifier = Modifier.weight(1f),
-                    title = "Sleep by day",
-                    subtitle = "Verified sleep stages",
-                    points = dailySleep,
-                    barColor = MaterialTheme.colorScheme.secondary,
-                    valueLabel = ::formatMinutesFloat,
-                    emptyMessage = "No verified sleep stages yet.",
-                )
-            }
+                title = "Steps by day",
+                subtitle = "Latest 7 days • verified daily totals",
+                points = dailySteps,
+                barColor = MaterialTheme.colorScheme.primary,
+                valueLabel = { String.format(Locale.US, "%.0f", it) },
+                emptyMessage = "No verified daily step history yet.",
+            )
+        }
+
+        item {
+            DailyBarChartCard(
+                modifier = Modifier.fillMaxWidth(),
+                title = "Sleep by day",
+                subtitle = "Latest 7 days • verified sleep-stage duration",
+                points = dailySleep,
+                barColor = MaterialTheme.colorScheme.secondary,
+                valueLabel = ::formatMinutesFloat,
+                emptyMessage = "No verified sleep stages yet.",
+            )
         }
 
         item {
@@ -628,29 +626,27 @@ private fun HistoryScreen(viewModel: MainViewModel) {
         }
 
         item {
-            Row(
+            DailyBarChartCard(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                DailyBarChartCard(
-                    modifier = Modifier.weight(1f),
-                    title = "Steps",
-                    subtitle = "7-day daily totals",
-                    points = buildDailyStepPoints(stepHistory, nowMillis),
-                    barColor = MaterialTheme.colorScheme.primary,
-                    valueLabel = { String.format(Locale.US, "%.0f", it) },
-                    emptyMessage = "No step-history days yet.",
-                )
-                DailyBarChartCard(
-                    modifier = Modifier.weight(1f),
-                    title = "Sleep",
-                    subtitle = "7-day verified duration",
-                    points = buildDailySleepPoints(sleepHistory, nowMillis),
-                    barColor = MaterialTheme.colorScheme.secondary,
-                    valueLabel = ::formatMinutesFloat,
-                    emptyMessage = "No sleep-stage days yet.",
-                )
-            }
+                title = "Steps",
+                subtitle = "Latest 7 daily totals",
+                points = buildDailyStepPoints(stepHistory, nowMillis),
+                barColor = MaterialTheme.colorScheme.primary,
+                valueLabel = { String.format(Locale.US, "%.0f", it) },
+                emptyMessage = "No step-history days yet.",
+            )
+        }
+
+        item {
+            DailyBarChartCard(
+                modifier = Modifier.fillMaxWidth(),
+                title = "Sleep",
+                subtitle = "Latest 7 verified sleep durations",
+                points = buildDailySleepPoints(sleepHistory, nowMillis),
+                barColor = MaterialTheme.colorScheme.secondary,
+                valueLabel = ::formatMinutesFloat,
+                emptyMessage = "No sleep-stage days yet.",
+            )
         }
 
         item {
