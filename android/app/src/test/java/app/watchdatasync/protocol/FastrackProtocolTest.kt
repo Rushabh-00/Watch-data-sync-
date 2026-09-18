@@ -18,8 +18,9 @@ class FastrackProtocolTest {
         val commands = FastrackProtocol().buildAutomaticSyncCommands(calendar())
         val payloads = commands.map { it.payload.toHex() }
 
-        assertTrue(payloads.contains("08 08 44 2A 01 24 39 43 75 6F FF FE D9 21 00 5F 78 4B E1 DC"))
-        assertTrue(payloads.contains("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"))
+        assertEquals(9, commands.size)
+        assertTrue(payloads.none { it == "08 08 44 2A 01 24 39 43 75 6F FF FE D9 21 00 5F 78 4B E1 DC" })
+        assertTrue(payloads.none { it == "00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02" })
         assertTrue(payloads.contains("A1"))
         assertTrue(payloads.contains("A2"))
         assertTrue(payloads.contains("B2 FA"))
