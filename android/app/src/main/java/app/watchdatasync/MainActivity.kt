@@ -668,12 +668,12 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        "Raw event log",
+                        "Discovery event log",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Connection and discovery events only. Heart-rate measurement packets are omitted. " +
+                        "HR and standard battery noise are omitted. " +
                             "Showing latest " + minOf(logs.size, 120) + " of " + logs.size + " events.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -818,7 +818,6 @@ private fun buildDiagnosticsClipboardText(
     appendLine("Heart-rate packets: OMITTED (already decoded by the app)")
     appendLine("Capture retention: rolling last 24 hours")
     appendLine("Purpose: discover unknown FT_38093 data channels such as SpO₂, sleep, stress, steps, workouts and history")
-    appendLine("Heart-rate packets: omitted from capture and event log because live HR is already decoded in the app")
     appendLine()
 
     val nonHeartRate = values.filterNot { isHeartRateCapture(it) }
