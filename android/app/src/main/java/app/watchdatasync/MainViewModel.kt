@@ -5,6 +5,7 @@ import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import androidx.lifecycle.AndroidViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import app.watchdatasync.ble.BleGattClient
 import app.watchdatasync.ble.BleScanner
 import app.watchdatasync.model.WatchDevice
@@ -13,6 +14,17 @@ import kotlinx.coroutines.flow.StateFlow
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val scanner = BleScanner(application)
     private val gattClient = BleGattClient(application)
+    private val preferences =
+        application.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+
+    private val _boundWatchAddress =
+        MutableStateFlow(preferences.getString(KEY_BOUND_ADDRESS, null))
+    private val _boundWatchName =
+        MutableStateFlow(preferences.getString(KEY_BOUND_NAME, null))
+
+    val boundWatchAddress: StateFlow<String?> = _boundWatchAddress
+    val boundWatchName: StateFlow<String?> = _boundWatchName
+    val liveHeartRate = gattClient.liveHeartRate
 
     val devices: StateFlow<List<WatchDevice>> = scanner.devices
     val connected = gattClient.connected
@@ -21,7 +33,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val logs = gattClient.logs
     val error = gattClient.error
 
-    fun startScan() = scanner.start()
+    fun startScan() = scanner.start(_boundWatchAddress.value)
 
     fun stopScan() = scanner.stop()
 
@@ -42,6 +54,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val device = adapter.getRemoteDevice(address)
+            val name = try { device.name?.takeIf { it.isNotBlank() } } catch (_: SecurityException) { null }
+            preferences.edit()
+                .putString(KEY_BOUND_ADDRESS, address)
+                .putString(KEY_BOUND_NAME, name ?: "FT_38093 watch")
+                .apply()
+            _boundWatchAddress.value = address
+            _boundWatchName.value = name ?: "FT_38093 watch"
+
             scanner.stop()
             gattClient.connect(device)
         } catch (e: SecurityException) {
@@ -61,11 +81,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshStandardData() = gattClient.refreshStandardData()
 
+    @SuppressLint("MissingPermission")
+    fun autoConnectBoundWatch() {
+        if (connected.value) return
+
+        val address = _boundWatchAddress.value ?: return
+        try {
+            val manager = getApplication<Application>()
+                .getSystemService(BluetoothManager::class.java)
+                ?: return
+            val adapter = manager.adapter
+            if (!adapter.isEnabled) return
+
+            val device = adapter.getRemoteDevice(address)
+            gattClient.connect(device)
+        } catch (e: SecurityException) {
+            gattClient.reportError("Bluetooth permission is required to auto-connect the watch")
+        } catch (e: IllegalArgumentException) {
+            forgetBoundWatch()
+        }
+    }
+
+    fun forgetBoundWatch() {
+        preferences.edit()
+            .remove(KEY_BOUND_ADDRESS)
+            .remove(KEY_BOUND_NAME)
+            .apply()
+        _boundWatchAddress.value = null
+        _boundWatchName.value = null
+    }
+
     fun clearError() = gattClient.clearError()
 
     fun clearCapture() = gattClient.clearCapture()
 
     fun disconnect() = gattClient.disconnect()
+
+    private companion object {
+        const val PREFS_NAME = "watch_preferences"
+        const val KEY_BOUND_ADDRESS = "bound_watch_address"
+        const val KEY_BOUND_NAME = "bound_watch_name"
+    }
 
     override fun onCleared() {
         scanner.stop()
