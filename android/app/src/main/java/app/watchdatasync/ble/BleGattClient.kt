@@ -12,15 +12,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 import android.os.Handler
 import android.os.Looper
+import app.watchdatasync.model.DailyActivitySummary
 import app.watchdatasync.model.GattCharacteristic
 import app.watchdatasync.model.GattService
 import app.watchdatasync.model.GattValue
+import app.watchdatasync.model.HeartRateHistorySample
+import app.watchdatasync.model.Spo2HistorySample
 import app.watchdatasync.protocol.FastrackProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.text.SimpleDateFormat
 import java.util.ArrayDeque
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -54,6 +58,14 @@ class BleGattClient(private val context: Context) {
             val descriptor: BluetoothGattDescriptor,
             val value: ByteArray,
         ) : GattOperation
+
+        data class Write(
+            val gatt: BluetoothGatt,
+            val characteristic: BluetoothGattCharacteristic,
+            val value: ByteArray,
+            val writeWithoutResponse: Boolean,
+            val settleDelayMs: Long,
+        ) : GattOperation
     }
 
     private val operationQueue = ArrayDeque<GattOperation>()
@@ -78,8 +90,32 @@ class BleGattClient(private val context: Context) {
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    private val dataPrefs = context.getSharedPreferences(
+        HEALTH_DATA_PREFS,
+        Context.MODE_PRIVATE,
+    )
+    private val _heartRateHistory = MutableStateFlow<List<HeartRateHistorySample>>(emptyList())
+    val heartRateHistory: StateFlow<List<HeartRateHistorySample>> = _heartRateHistory.asStateFlow()
+    private val _spo2History = MutableStateFlow<List<Spo2HistorySample>>(emptyList())
+    val spo2History: StateFlow<List<Spo2HistorySample>> = _spo2History.asStateFlow()
+    private val _dailyActivity = MutableStateFlow<DailyActivitySummary?>(null)
+    val dailyActivity: StateFlow<DailyActivitySummary?> = _dailyActivity.asStateFlow()
+    private val _batteryPercent = MutableStateFlow<Int?>(null)
+    val batteryPercent: StateFlow<Int?> = _batteryPercent.asStateFlow()
+    private val _lastSyncAt = MutableStateFlow<Long?>(null)
+    val lastSyncAt: StateFlow<Long?> = _lastSyncAt.asStateFlow()
+    private val _syncing = MutableStateFlow(false)
+    val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
+    private var syncFinishRunnable: Runnable? = null
+    private var syncRequested = false
+
     init {
         _values.value = loadPersistedCapture()
+        _heartRateHistory.value = loadHeartRateHistory()
+        _spo2History.value = loadSpo2History()
+        _dailyActivity.value = loadDailyActivity()
+        _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
+        _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
     }
 
     @SuppressLint("MissingPermission")
@@ -215,11 +251,14 @@ class BleGattClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     fun refreshStandardData() {
-        val currentGatt = gatt ?: return
-        if (!_connected.value) return
+        syncNow()
+    }
 
-        enqueueStandardCharacteristics(currentGatt)
-        startNextOperation()
+    @SuppressLint("MissingPermission")
+    fun syncNow() {
+        val currentGatt = gatt ?: return
+        if (!_connected.value || !matchedVendorProtocol || syncRequested) return
+        enqueueFt38093Sync(currentGatt)
     }
 
     @SuppressLint("MissingPermission")
@@ -285,6 +324,84 @@ class BleGattClient(private val context: Context) {
         if (supportsNotify || supportsIndicate) {
             enqueueNotification(currentGatt, characteristic)
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enqueueWrite(
+        currentGatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+        writeWithoutResponse: Boolean,
+        settleDelayMs: Long,
+        label: String,
+    ) {
+        if (currentGatt !== gatt) return
+        val key = "write:" + characteristic.uuid + ":" + hex(value)
+        if (!queuedOperationKeys.add(key)) return
+        appendLog("SYNC_QUEUE " + label + " char=" + characteristic.uuid + " bytes=" + hex(value))
+        operationQueue.addLast(
+            GattOperation.Write(
+                gatt = currentGatt,
+                characteristic = characteristic,
+                value = value,
+                writeWithoutResponse = writeWithoutResponse,
+                settleDelayMs = settleDelayMs,
+            ),
+        )
+        startNextOperation()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enqueueFt38093Sync(currentGatt: BluetoothGatt) {
+        val characteristics = currentGatt.services.flatMap { it.characteristics }
+        val channel1 = characteristics.firstOrNull { it.uuid.toString().equals(CHAR_33F1_UUID, ignoreCase = true) }
+        val channel2 = characteristics.firstOrNull { it.uuid.toString().equals(CHAR_34F1_UUID, ignoreCase = true) }
+        if (channel1 == null || channel2 == null) {
+            appendLog("SYNC unavailable: FT_38093 write channels are missing")
+            return
+        }
+
+        syncRequested = true
+        _syncing.value = true
+        _error.value = null
+        appendLog("SYNC_START FT_38093 automatic health/history sync")
+
+        val now = Calendar.getInstance()
+        fastrackProtocol.buildAutomaticSyncCommands(now).forEach { command ->
+            val characteristic = when (command.characteristicUuid.lowercase(Locale.ROOT)) {
+                CHAR_33F1_UUID -> channel1
+                CHAR_34F1_UUID -> channel2
+                else -> null
+            } ?: return@forEach
+
+            val supportsWrite = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+            val supportsWriteNr = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+            if (!supportsWrite && !supportsWriteNr) {
+                appendLog("SYNC skip " + command.label + " unsupported=" + characteristic.uuid)
+                return@forEach
+            }
+
+            enqueueWrite(
+                currentGatt = currentGatt,
+                characteristic = characteristic,
+                value = command.payload,
+                writeWithoutResponse = command.writeWithoutResponse || (!supportsWrite && supportsWriteNr),
+                settleDelayMs = command.settleDelayMs,
+                label = command.label,
+            )
+        }
+
+        syncFinishRunnable?.let(handler::removeCallbacks)
+        val runnable = Runnable {
+            syncRequested = false
+            _syncing.value = false
+            val stamp = System.currentTimeMillis()
+            _lastSyncAt.value = stamp
+            dataPrefs.edit().putLong(KEY_LAST_SYNC, stamp).apply()
+            appendLog("SYNC_COMPLETE FT_38093")
+        }
+        syncFinishRunnable = runnable
+        handler.postDelayed(runnable, SYNC_COMPLETE_DELAY_MS)
     }
 
     private fun enqueueRead(
@@ -361,6 +478,7 @@ class BleGattClient(private val context: Context) {
         val operationGatt = when (next) {
             is GattOperation.Read -> next.gatt
             is GattOperation.EnableNotification -> next.gatt
+            is GattOperation.Write -> next.gatt
         }
 
         if (operationGatt !== currentGatt) {
@@ -409,6 +527,26 @@ class BleGattClient(private val context: Context) {
 
                     if (!writeStarted) finishOperation(key)
                 }
+
+                is GattOperation.Write -> {
+                    @Suppress("DEPRECATION")
+                    next.characteristic.writeType =
+                        if (next.writeWithoutResponse) {
+                            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+                        } else {
+                            BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                        }
+                    @Suppress("DEPRECATION")
+                    next.characteristic.value = next.value
+                    @Suppress("DEPRECATION")
+                    val started = currentGatt.writeCharacteristic(next.characteristic)
+                    appendLog(
+                        "WRITE " + next.characteristic.uuid +
+                            " started=" + started +
+                            " type=" + if (next.writeWithoutResponse) "NR" else "R",
+                    )
+                    if (!started || next.writeWithoutResponse) finishOperation(key)
+                }
             }
         } catch (e: SecurityException) {
             reportError("Bluetooth permission was denied")
@@ -447,12 +585,17 @@ class BleGattClient(private val context: Context) {
         operationTimeout = null
         activeOperation = null
         queuedOperationKeys.remove(key)
-        handler.postDelayed({ startNextOperation() }, GATT_OPERATION_GAP_MS)
+        val delay = when (active) {
+            is GattOperation.Write -> active.settleDelayMs
+            else -> GATT_OPERATION_GAP_MS
+        }
+        handler.postDelayed({ startNextOperation() }, delay)
     }
 
     private fun operationKey(operation: GattOperation): String = when (operation) {
         is GattOperation.Read -> "read:" + operation.characteristic.uuid
         is GattOperation.EnableNotification -> "notify:" + operation.characteristic.uuid
+        is GattOperation.Write -> "write:" + operation.characteristic.uuid + ":" + hex(operation.value)
     }
 
     private fun clearOperationQueue() {
@@ -613,7 +756,12 @@ class BleGattClient(private val context: Context) {
             enqueueObservedNotifications(gatt)
 
             handler.postDelayed(
-                { startNextOperation() },
+                {
+                    startNextOperation()
+                    if (matchedVendorProtocol) {
+                        handler.postDelayed({ syncNow() }, SYNC_START_DELAY_MS)
+                    }
+                },
                 DISCOVERY_TO_GATT_OPERATION_DELAY_MS,
             )
         }
@@ -702,6 +850,22 @@ class BleGattClient(private val context: Context) {
             finishOperation(key)
         }
 
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicWrite(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            if (this@BleGattClient.gatt != gatt) return
+            val active = activeOperation
+            if (active is GattOperation.Write &&
+                active.characteristic.uuid == characteristic.uuid
+            ) {
+                appendLog("WRITE_RESULT " + characteristic.uuid + " status=" + status)
+                finishOperation(operationKey(active))
+            }
+        }
+
         override fun onMtuChanged(
             gatt: BluetoothGatt,
             mtu: Int,
@@ -767,6 +931,8 @@ class BleGattClient(private val context: Context) {
     ) {
         if (this.gatt != gatt) return
 
+        decodeFastrackSyncPacket(characteristic.uuid.toString(), value)
+
         val serviceUuid = gatt.services.firstOrNull { service ->
             service.characteristics.any { it.uuid == characteristic.uuid }
         }?.uuid?.toString() ?: "unknown"
@@ -812,6 +978,187 @@ class BleGattClient(private val context: Context) {
             source + " " + characteristic.uuid +
                 " value=" + item.hex +
                 (item.decoded?.let { " decoded=" + it } ?: ""),
+        )
+    }
+
+    private fun decodeFastrackSyncPacket(
+        characteristicUuid: String,
+        value: ByteArray,
+    ) {
+        if (!matchedVendorProtocol || value.isEmpty()) return
+        if (!characteristicUuid.equals(CHAR_33F2_UUID, ignoreCase = true) &&
+            !characteristicUuid.equals(CHAR_34F2_UUID, ignoreCase = true)
+        ) return
+
+        when (value[0].toInt() and 0xFF) {
+            0xA1 -> {
+                val serial = value.copyOfRange(1, value.size).toString(Charsets.US_ASCII).trimEnd('\u0000', ' ')
+                if (serial.isNotBlank()) appendLog("SYNC_DATA serial=" + serial)
+            }
+            0xA2 -> {
+                val battery = value.getOrNull(1)?.toInt()?.and(0xFF)
+                if (battery != null && battery in 0..100) {
+                    _batteryPercent.value = battery
+                    dataPrefs.edit().putInt(KEY_BATTERY, battery).apply()
+                    appendLog("SYNC_DATA battery=" + battery + "%")
+                }
+            }
+            0x26 -> {
+                if (value.size >= 10 && (value[1].toInt() and 0xFF) == 0x01) {
+                    val summary = DailyActivitySummary(
+                        epochMillis = System.currentTimeMillis(),
+                        steps = leU16(value, 3),
+                        calories = leU16(value, 5),
+                        distanceMeters = leU16(value, 7),
+                        activeMinutes = value[9].toInt() and 0xFF,
+                    )
+                    _dailyActivity.value = summary
+                    persistDailyActivity(summary)
+                    appendLog(
+                        "SYNC_DATA activity=" + summary.steps + " steps, " +
+                            summary.calories + " kcal, " +
+                            summary.distanceMeters + " m, " +
+                            summary.activeMinutes + " min",
+                    )
+                }
+            }
+            0xF7 -> decodeHeartRateHistory(value)
+            0x34 -> decodeSpo2History(value)
+            0x32, 0xCB, 0xB1, 0xB2 -> appendLog("SYNC_DATA passive frame " + hex(value))
+        }
+    }
+
+    private fun decodeHeartRateHistory(value: ByteArray) {
+        if (value.size < 7) return
+        val start = if ((value[1].toInt() and 0xFF) == 0xFA) 2 else 1
+        if (value.size < start + 5) return
+        val year = ((value[start].toInt() and 0xFF) shl 8) or (value[start + 1].toInt() and 0xFF)
+        val month = value[start + 2].toInt() and 0xFF
+        val day = value[start + 3].toInt() and 0xFF
+        val page = value[start + 4].toInt() and 0xFF
+        if (year !in 2020..2100 || month !in 1..12 || day !in 1..31 || page !in 0..23) return
+
+        val calendar = Calendar.getInstance().apply {
+            clear()
+            set(year, month - 1, day, page, 0, 0)
+        }
+        val samples = value.drop(start + 5).mapIndexedNotNull { index, raw ->
+            val bpm = raw.toInt() and 0xFF
+            if (bpm in 30..220) HeartRateHistorySample(
+                epochMillis = calendar.timeInMillis + index * 5L * 60L * 1000L,
+                bpm = bpm,
+            ) else null
+        }
+        if (samples.isNotEmpty()) {
+            _heartRateHistory.value = mergeHeartRateHistory(_heartRateHistory.value, samples)
+            persistHeartRateHistory()
+            appendLog("SYNC_DATA heart-rate history page=" + page + " samples=" + samples.size)
+        }
+    }
+
+    private fun decodeSpo2History(value: ByteArray) {
+        if (value.size < 8) return
+        val hasFa = (value[1].toInt() and 0xFF) == 0xFA
+        val yearIndex = if (hasFa) 2 else 1
+        if (yearIndex + 4 >= value.size) return
+        val year = ((value[yearIndex].toInt() and 0xFF) shl 8) or (value[yearIndex + 1].toInt() and 0xFF)
+        val month = value[yearIndex + 2].toInt() and 0xFF
+        val day = value[yearIndex + 3].toInt() and 0xFF
+        val hour = value[yearIndex + 4].toInt() and 0xFF
+        val percent = value.last().toInt() and 0xFF
+        if (year !in 2020..2100 || month !in 1..12 || day !in 1..31 || hour !in 0..23 || percent !in 70..100) return
+
+        val calendar = Calendar.getInstance().apply {
+            clear()
+            set(year, month - 1, day, hour, 0, 0)
+        }
+        val sample = Spo2HistorySample(calendar.timeInMillis, percent)
+        _spo2History.value = mergeSpo2History(_spo2History.value, listOf(sample))
+        persistSpo2History()
+        appendLog(
+            "SYNC_DATA SpO2=" + percent + "% at " +
+                year + "-" + month.toString().padStart(2, '0') + "-" +
+                day.toString().padStart(2, '0') + " " +
+                hour.toString().padStart(2, '0') + ":00",
+        )
+    }
+
+    private fun leU16(value: ByteArray, offset: Int): Int =
+        (value[offset].toInt() and 0xFF) or ((value[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun mergeHeartRateHistory(existing: List<HeartRateHistorySample>, incoming: List<HeartRateHistorySample>): List<HeartRateHistorySample> =
+        (existing + incoming).distinctBy { it.epochMillis }.filter {
+            it.epochMillis >= System.currentTimeMillis() - HEART_RATE_RETENTION_MS
+        }.sortedBy { it.epochMillis }.takeLast(MAX_HEART_RATE_HISTORY)
+
+    private fun mergeSpo2History(existing: List<Spo2HistorySample>, incoming: List<Spo2HistorySample>): List<Spo2HistorySample> =
+        (existing + incoming).distinctBy { it.epochMillis }.filter {
+            it.epochMillis >= System.currentTimeMillis() - SPO2_RETENTION_MS
+        }.sortedBy { it.epochMillis }.takeLast(MAX_SPO2_HISTORY)
+
+    private fun persistHeartRateHistory() {
+        val array = JSONArray()
+        _heartRateHistory.value.forEach { item -> array.put(JSONObject().apply {
+            put("time", item.epochMillis); put("bpm", item.bpm)
+        }) }
+        dataPrefs.edit().putString(KEY_HEART_RATE_HISTORY, array.toString()).apply()
+    }
+
+    private fun persistSpo2History() {
+        val array = JSONArray()
+        _spo2History.value.forEach { item -> array.put(JSONObject().apply {
+            put("time", item.epochMillis); put("spo2", item.percent)
+        }) }
+        dataPrefs.edit().putString(KEY_SPO2_HISTORY, array.toString()).apply()
+    }
+
+    private fun persistDailyActivity(summary: DailyActivitySummary) {
+        dataPrefs.edit()
+            .putLong(KEY_ACTIVITY_TIME, summary.epochMillis)
+            .putInt(KEY_STEPS, summary.steps)
+            .putInt(KEY_CALORIES, summary.calories)
+            .putInt(KEY_DISTANCE, summary.distanceMeters)
+            .putInt(KEY_ACTIVE_MINUTES, summary.activeMinutes)
+            .apply()
+    }
+
+    private fun loadHeartRateHistory(): List<HeartRateHistorySample> {
+        val raw = dataPrefs.getString(KEY_HEART_RATE_HISTORY, null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val cutoff = System.currentTimeMillis() - HEART_RATE_RETENTION_MS
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val time = item.optLong("time", 0L)
+                val bpm = item.optInt("bpm", 0)
+                if (time >= cutoff && bpm in 30..220) add(HeartRateHistorySample(time, bpm))
+            }
+        }.takeLast(MAX_HEART_RATE_HISTORY)
+    }
+
+    private fun loadSpo2History(): List<Spo2HistorySample> {
+        val raw = dataPrefs.getString(KEY_SPO2_HISTORY, null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val cutoff = System.currentTimeMillis() - SPO2_RETENTION_MS
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val time = item.optLong("time", 0L)
+                val percent = item.optInt("spo2", 0)
+                if (time >= cutoff && percent in 70..100) add(Spo2HistorySample(time, percent))
+            }
+        }.takeLast(MAX_SPO2_HISTORY)
+    }
+
+    private fun loadDailyActivity(): DailyActivitySummary? {
+        val time = dataPrefs.getLong(KEY_ACTIVITY_TIME, 0L)
+        if (time <= 0L) return null
+        return DailyActivitySummary(
+            epochMillis = time,
+            steps = dataPrefs.getInt(KEY_STEPS, 0),
+            calories = dataPrefs.getInt(KEY_CALORIES, 0),
+            distanceMeters = dataPrefs.getInt(KEY_DISTANCE, 0),
+            activeMinutes = dataPrefs.getInt(KEY_ACTIVE_MINUTES, 0),
         )
     }
 
@@ -1051,6 +1398,22 @@ class BleGattClient(private val context: Context) {
     private companion object {
         const val CAPTURE_PREFS = "watch_capture"
         const val CAPTURE_KEY = "packets"
+        const val HEALTH_DATA_PREFS = "watch_health_data"
+        const val KEY_HEART_RATE_HISTORY = "heart_rate_history"
+        const val KEY_SPO2_HISTORY = "spo2_history"
+        const val KEY_ACTIVITY_TIME = "daily_activity_time"
+        const val KEY_STEPS = "daily_steps"
+        const val KEY_CALORIES = "daily_calories"
+        const val KEY_DISTANCE = "daily_distance"
+        const val KEY_ACTIVE_MINUTES = "daily_active_minutes"
+        const val KEY_BATTERY = "watch_battery"
+        const val KEY_LAST_SYNC = "last_sync_at"
+        const val HEART_RATE_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
+        const val SPO2_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
+        const val MAX_HEART_RATE_HISTORY = 20_000
+        const val MAX_SPO2_HISTORY = 5_000
+        const val SYNC_COMPLETE_DELAY_MS = 20_000L
+        const val SYNC_START_DELAY_MS = 1_000L
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
         const val CAPTURE_PERSIST_DELAY_MS = 2_000L
         const val MAX_CAPTURE_VALUES = 20_000
@@ -1058,6 +1421,9 @@ class BleGattClient(private val context: Context) {
         const val BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
         const val HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
         const val VENDOR_HEART_RATE_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
+        const val CHAR_33F1_UUID = "000033f1-0000-1000-8000-00805f9b34fb"
+        const val CHAR_34F1_UUID = "000034f1-0000-1000-8000-00805f9b34fb"
+        const val CHAR_34F2_UUID = "000034f2-0000-1000-8000-00805f9b34fb"
         const val SPO2_SPOT_CHECK_UUID = "00002a5e-0000-1000-8000-00805f9b34fb"
         const val SPO2_CONTINUOUS_UUID = "00002a5f-0000-1000-8000-00805f9b34fb"
         const val SERVICE_CHANGED_UUID = "00002a05-0000-1000-8000-00805f9b34fb"
