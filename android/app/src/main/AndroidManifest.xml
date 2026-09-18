@@ -18,7 +18,6 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_watch_launcher"
         android:roundIcon="@drawable/ic_watch_launcher"
-        android:appCategory="productivity"
         android:label="Watch Data Sync"
         android:supportsRtl="true"
         android:theme="@style/Theme.WatchDataSync">
