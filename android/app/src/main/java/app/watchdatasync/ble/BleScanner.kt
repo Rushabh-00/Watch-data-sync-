@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class BleScanner(context: Context) {
     private var preferredAddress: String? = null
+    var onCompatibleDeviceFound: ((WatchDevice) -> Unit)? = null
 
     private val adapter: BluetoothAdapter? =
         context.getSystemService(BluetoothManager::class.java)?.adapter
@@ -27,7 +28,7 @@ class BleScanner(context: Context) {
     val devices: StateFlow<List<WatchDevice>> = _devices.asStateFlow()
 
     @SuppressLint("MissingPermission")
-    fun start(preferredAddress: String? = null) {
+    fun start(preferredAddress: String? = null, autoConnectFirst: Boolean = false) {
         this.preferredAddress = preferredAddress
         val bleScanner = scanner ?: return
         _devices.value = emptyList()
@@ -50,13 +51,15 @@ class BleScanner(context: Context) {
         preferredAddress: String?,
     ): Boolean {
         // Once a watch is bound, never surface another BLE peripheral.
-        if (preferredAddress != null) {
-            return address.equals(preferredAddress, ignoreCase = true)
-        }
-
-        // Before binding, discover only the known FT_38093 watch family.
-        // Do not show phones, earbuds, trackers, or unrelated Fastrack devices.
         val normalized = name.trim().lowercase()
+        // Do not require Android's system Bluetooth bond. Prefer the remembered
+        // address when present, but accept a matching FT_38093 advertisement
+        // after an unpair/reset changed the address.
+        if (preferredAddress != null &&
+            address.equals(preferredAddress, ignoreCase = true)
+        ) {
+            return true
+        }
         return normalized.startsWith("ft_38093")
     }
 
@@ -82,6 +85,10 @@ class BleScanner(context: Context) {
                 add(next)
                 addAll(_devices.value.filterNot { it.address == next.address })
             }.sortedByDescending { it.rssi }
+
+            if (autoConnectFirst) {
+                onCompatibleDeviceFound?.invoke(next)
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
