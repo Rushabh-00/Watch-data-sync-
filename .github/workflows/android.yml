@@ -55,10 +55,33 @@ jobs:
           add-job-summary: on-failure
 
       - name: Build debug APK
+        id: build
+        continue-on-error: true
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace --console=plain
+        run: |
+          set +e
+          gradle assembleDebug --no-daemon --stacktrace --console=plain 2>&1 | tee ../build.log
+          status=${PIPESTATUS[0]}
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          exit "${status}"
+
+      - name: Report build failure
+        if: steps.build.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          log = Path("build.log").read_text(errors="replace")
+          tail = "\n".join(log.splitlines()[-160:])
+          body = "### Android build failure\n\nCommit: " + "${{ github.sha }}" + "\n\n```text\n" + tail + "\n```"
+          Path("comment.json").write_text(json.dumps({"body": body}))
+          PY
+          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" --input comment.json
 
       - name: Publish direct APK
+        if: steps.build.outcome == 'success'
         working-directory: android
         env:
           GH_TOKEN: ${{ github.token }}
