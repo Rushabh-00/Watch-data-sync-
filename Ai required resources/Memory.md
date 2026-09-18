@@ -156,3 +156,12 @@ Current goal for the next continuation:
 - Home Today Steps now reads the verified B2 step-history total directly instead of the discarded/unverified daily-activity decoder.
 - 0x26 is not used for health sync on this firmware. No calorie or distance field is currently verified. 0xAA/0xB1 are retained as activity-status candidate frames only; their fields are not yet decoded.
 - v0.3.5 is the next hardware-validation build. The key diagnostic evidence is SYNC_RESPONSE for Sync step history followed by SYNC_DATA step-history, and SYNC_RESPONSE for Sync heart-rate history followed by SYNC_DATA heart-rate history page.
+
+
+## FT_38093 diagnostics follow-up — 2026-09-18 19:30 UTC
+
+- New hardware log confirms the response-aware queue fixed the earlier race for sleep and heart-rate history: 31 01 session markers are received and completed by 31 02; F7 pages are received through F7 FD.
+- New hardware log confirms SpO2 history data is received on 33F2, even though the request is written to 34F1. The app's transaction matcher had expected 34F2, so it waited for timeout even while decoding the actual 34 FA packets. The code was changed to accept both 33F2 and 34F2 for a 34F1 request.
+- B2 FA is written successfully but this FT_38093 capture still returns no B2 packets before the previous 12 s timeout. The fetch window was increased to 30 s, matching the related protocol implementation's 30 s fetch timeout. No B2 field values are to be fabricated.
+- Related verified family protocol documents B1 realtime steps as the same 18-byte layout as B2; the app now decodes B1 with the same layout so a future passive B1 step packet can update today's total without another guessed opcode.
+- Calories and distance remain derived activity metrics rather than a verified FT_38093 history packet. Public GloryFit manuals state distance/calories are calculated from steps plus user height/weight, but the exact FT_38093 formula and the app's user-profile source are not yet established. Do not hardcode or invent values.
