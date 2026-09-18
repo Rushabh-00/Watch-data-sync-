@@ -195,3 +195,14 @@ Current goal for the next continuation:
 - 44 FA is treated as a vendor-history structure, not labeled as sleep, stress, steps, workout or another health metric. EC records are likewise kept semantically neutral.
 - This continuation keeps the verified FT_38093 paths unchanged: live heart rate, heart-rate history, SpO2 history, watch-specific battery and time synchronization. B2 step history, calories, distance and detailed sleep-stage semantics remain gated until a direct repeatable FT_38093 correlation exists.
 - v0.4.1 packages this evidence-backed structural decoder and the Smart Features evidence surface.
+
+
+## Play Protect distribution hardening — 2026-09-19 continuation
+
+- The v0.4.1 sideload APK was blocked on installation with the exact Play Protect message about access to sensitive data.
+- Current Google developer guidance identifies Notification Listener access as a sensitive capability that can cause automatic blocking for apps installed from internet-sideloading sources.
+- The notification listener was therefore moved out of the main source set into the Play-only source set.
+- v0.4.2 uses two distribution flavors: `sideload` omits notification-listener access and is the APK published from GitHub releases; `play` retains the notification bridge for a future Play-distributed build.
+- Both flavors are compiled and tested by CI; only the sideload-safe flavor is signed/uploaded as the public GitHub release APK.
+- BLE/GATT sync functionality and the verified FT_38093 protocol paths are unchanged by this distribution split.
+- Added a proper launcher icon and explicit distribution metadata.
