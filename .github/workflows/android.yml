@@ -85,9 +85,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            test -n "${!name}" || { echo "Missing repository secret: $name"; exit 1; }
-          done
 
           mkdir -p dist
           keystore="$RUNNER_TEMP/watch-data-sync-release.jks"
@@ -95,7 +92,24 @@ jobs:
           aligned="$RUNNER_TEMP/WatchDataSync-aligned.apk"
           output="dist/WatchDataSync-release.apk"
 
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          if [[ -n "${ANDROID_KEYSTORE_BASE64}" || -n "${ANDROID_KEYSTORE_PASSWORD}" || -n "${ANDROID_KEY_ALIAS}" || -n "${ANDROID_KEY_PASSWORD}" ]]; then
+            for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+              test -n "${!name}" || { echo "Incomplete repository signing secrets: $name"; exit 1; }
+            done
+            echo "Using repository release signing key."
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          else
+            echo "Release signing secrets are not configured; using the runner Android debug keystore for this test APK."
+            keystore="$HOME/.android/debug.keystore"
+            mkdir -p "$HOME/.android"
+            if [[ ! -s "$keystore" ]]; then
+              "$JAVA_HOME/bin/keytool" -genkeypair -v                 -keystore "$keystore"                 -storetype JKS                 -storepass android                 -keypass android                 -alias androiddebugkey                 -keyalg RSA                 -keysize 2048                 -validity 10000                 -dname "CN=Android Debug,O=Android,C=US"
+            fi
+            ANDROID_KEYSTORE_PASSWORD="android"
+            ANDROID_KEY_ALIAS="androiddebugkey"
+            ANDROID_KEY_PASSWORD="android"
+          fi
+
           test -s "$keystore"
           test -s "$unsigned"
 
@@ -115,7 +129,10 @@ jobs:
           "$apksigner_bin" verify --verbose "$output"
 
           test -s "$output"
-          rm -f "$keystore" "$aligned"
+          rm -f "$aligned"
+          if [[ "$keystore" == "$RUNNER_TEMP/"* ]]; then
+            rm -f "$keystore"
+          fi
 
       - name: Create or update version release
         env:
