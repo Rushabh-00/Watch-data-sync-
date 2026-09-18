@@ -11,12 +11,23 @@ android {
         applicationId = "app.watchdatasync"
         minSdk = 26
         targetSdk = 37
-        versionCode = 8
-        versionName = "0.3.6"
+        versionCode = 9
+        versionName = "0.3.7"
     }
 
     buildFeatures {
         compose = true
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
     }
 
     compileOptions {
