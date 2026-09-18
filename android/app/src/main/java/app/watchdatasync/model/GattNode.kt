@@ -19,5 +19,5 @@ data class GattValue(
     val decoded: String?,
 ) {
     val key: String
-        get() = serviceUuid + "/" + characteristicUuid
+        get() = serviceUuid + "/" + characteristicUuid + "/" + timestamp + "/" + hex
 }
