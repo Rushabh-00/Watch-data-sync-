@@ -55,9 +55,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Test and build release APK
+      - name: Test and build both distribution variants
         working-directory: android
-        run: gradle test assembleRelease --configuration-cache --build-cache --parallel
+        run: gradle test :app:assembleSideloadRelease :app:assemblePlayRelease --configuration-cache --build-cache --parallel
 
       - name: Sign release APK
         env:
@@ -76,7 +76,7 @@ jobs:
 
           mkdir -p dist
           KEYSTORE="$RUNNER_TEMP/watch-data-sync-release.jks"
-          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          UNSIGNED="app/build/outputs/apk/sideload/release/app-sideload-release-unsigned.apk"
           ALIGNED="$RUNNER_TEMP/WatchDataSync-aligned.apk"
           OUTPUT="dist/WatchDataSync-release.apk"
 
@@ -150,5 +150,6 @@ jobs:
           fi
 
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,name
-          echo "### APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Sideload-safe APK" >> "$GITHUB_STEP_SUMMARY"
           echo "[Download WatchDataSync-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-release.apk)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Play distribution variant is built and tested separately; it is not attached to the sideload release because it declares notification-listener access." >> "$GITHUB_STEP_SUMMARY"
