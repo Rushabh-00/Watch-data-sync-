@@ -136,3 +136,13 @@ Current goal for the next continuation:
 - v0.3.3 first CI compile attempt reached the Kotlin compile stage but failed only on the new chart file import: Compose `Stroke` must come from `ui.graphics.drawscope`.
 - No protocol test failure was reported before compilation stopped. The import is corrected on main before the next build run.
 - The GATT queue cleanup also now clears the sync-in-progress state when a connection is dropped, avoiding a stale Syncing UI state after disconnect/reconnect.
+
+## FT_38093 activity correction from 2026-09-18 18:32 UTC capture
+
+- The latest hardware capture identifies the returned 26 01 packet as watch-face configuration on this firmware. The exact 20-byte response 26 01 00 6E C3 79 01 68 01 68 00 00 10 00 00 03 03 00 00 00 maps to a 360x360 dial configuration with 1 MiB maximum dial data and compatible level 3. It is not daily steps/calories/distance.
+- 26 01 is removed from automatic health sync and is decoded only as watch-face configuration evidence.
+- Matching SDK documentation identifies B2 FA as step-history fetch and 18-byte B2 records as yyyy MM dd HH total16 ... with the cumulative total at bytes 6..7 big-endian. The app now decodes and persists those verified step-history records and derives today's step total from the latest current-date record.
+- The latest capture contained no B2 response after the B2 FA write. v0.3.4 therefore gives the B2 request a longer response window so the next capture can show the real step records before later history traffic.
+- The related SDK documentation states daily B2 records do not contain distance; its vendor app calculates daily distance from steps and the user profile, while workout distance is GPS-driven. No calorie-history source was verified for this FT_38093 capture. Calories/distance therefore remain unverified rather than being fabricated.
+- The previous 6001 / 347 / 2.29 km watch-display values remain validation targets, not values extracted from the latest 26 01 packet.
+- UI wording now distinguishes verified B2 steps from unverified calorie/distance data.

@@ -24,3 +24,9 @@ data class SleepStageSample(
     val durationMinutes: Int,
 )
 
+
+
+data class StepHistorySample(
+    val epochMillis: Long,
+    val totalSteps: Int,
+)

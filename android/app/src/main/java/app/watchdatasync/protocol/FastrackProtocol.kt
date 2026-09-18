@@ -54,6 +54,16 @@ class FastrackProtocol : WatchProtocol {
         val flags: Long,
     )
 
+    data class WatchFaceConfig(
+        val dialNumber: Long,
+        val width: Int,
+        val height: Int,
+        val screenType: Int,
+        val maxDataSize: Long,
+        val compatibleLevel: Int,
+        val cornerAngle: Int,
+    )
+
     data class SleepStageRecord(
         val hour: Int,
         val minute: Int,
@@ -108,13 +118,6 @@ class FastrackProtocol : WatchProtocol {
                 payload = hex("BB"),
                 writeWithoutResponse = false,
                 settleDelayMs = 600L,
-            ),
-            Command(
-                label = "Sync daily activity summary",
-                characteristicUuid = CHAR_33F1_UUID,
-                payload = hex("26 01"),
-                writeWithoutResponse = false,
-                settleDelayMs = 2_000L,
             ),
             Command(
                 label = "Query step and sleep status",
@@ -180,13 +183,17 @@ class FastrackProtocol : WatchProtocol {
             return "Heart-rate frame • raw value $bpm • no valid live BPM"
         }
 
-        if (b0 == 0x26) {
-            val activity = decodeDailyActivity(packet)
-            if (activity != null) {
-                return "FT_38093 daily activity • steps=" + activity.steps +
-                    " • calories=" + activity.calories + " kcal" +
-                    " • distance=" + activity.distanceMeters + " m" +
-                    " • active=" + activity.activeMinutes + " min"
+        if (
+            b0 == 0x26 &&
+            packet.size >= 18 &&
+            (packet[1].toInt() and 0xFF) == 0x01
+        ) {
+            val config = decodeWatchFaceConfig(packet)
+            if (config != null) {
+                return "FT_38093 watch-face config • " +
+                    config.width + "x" + config.height +
+                    " • max=" + config.maxDataSize +
+                    " • level=" + config.compatibleLevel
             }
         }
 
@@ -237,6 +244,41 @@ class FastrackProtocol : WatchProtocol {
         }
 
         return null
+    }
+
+    fun decodeWatchFaceConfig(packet: ByteArray): WatchFaceConfig? {
+        if (packet.size < 18) return null
+        if ((packet[0].toInt() and 0xFF) != 0x26 || (packet[1].toInt() and 0xFF) != 0x01) {
+            return null
+        }
+
+        val dialNumber =
+            ((packet[2].toLong() and 0xFFL) shl 24) or
+                ((packet[3].toLong() and 0xFFL) shl 16) or
+                ((packet[4].toLong() and 0xFFL) shl 8) or
+                (packet[5].toLong() and 0xFFL)
+        val width = beU16(packet, 6)
+        val height = beU16(packet, 8)
+        val screenType = packet[10].toInt() and 0xFF
+        val maxDataSize =
+            ((packet[11].toLong() and 0xFFL) shl 24) or
+                ((packet[12].toLong() and 0xFFL) shl 16) or
+                ((packet[13].toLong() and 0xFFL) shl 8) or
+                (packet[14].toLong() and 0xFFL)
+        val compatibleLevel = packet[15].toInt() and 0xFF
+        val cornerAngle = packet[17].toInt() and 0xFF
+
+        if (width !in 1..1000 || height !in 1..1000 || maxDataSize <= 0L) return null
+
+        return WatchFaceConfig(
+            dialNumber = dialNumber,
+            width = width,
+            height = height,
+            screenType = screenType,
+            maxDataSize = maxDataSize,
+            compatibleLevel = compatibleLevel,
+            cornerAngle = cornerAngle,
+        )
     }
 
     fun decodeDailyActivity(packet: ByteArray): DailyActivityRecord? {

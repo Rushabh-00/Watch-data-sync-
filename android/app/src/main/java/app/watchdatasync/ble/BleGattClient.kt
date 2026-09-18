@@ -18,6 +18,7 @@ import app.watchdatasync.model.GattService
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.HeartRateHistorySample
 import app.watchdatasync.model.SleepStageSample
+import app.watchdatasync.model.StepHistorySample
 import app.watchdatasync.model.Spo2HistorySample
 import app.watchdatasync.protocol.FastrackProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,6 +102,10 @@ class BleGattClient(private val context: Context) {
     val spo2History: StateFlow<List<Spo2HistorySample>> = _spo2History.asStateFlow()
     private val _dailyActivity = MutableStateFlow<DailyActivitySummary?>(null)
     val dailyActivity: StateFlow<DailyActivitySummary?> = _dailyActivity.asStateFlow()
+    private val _stepHistory = MutableStateFlow<List<StepHistorySample>>(emptyList())
+    val stepHistory: StateFlow<List<StepHistorySample>> = _stepHistory.asStateFlow()
+    private val _todayStepTotal = MutableStateFlow<Int?>(null)
+    val todayStepTotal: StateFlow<Int?> = _todayStepTotal.asStateFlow()
     private val _activityProbeStatus = MutableStateFlow("Waiting for verified activity response")
     val activityProbeStatus: StateFlow<String> = _activityProbeStatus.asStateFlow()
     private val _sleepHistory = MutableStateFlow<List<SleepStageSample>>(emptyList())
@@ -121,11 +126,10 @@ class BleGattClient(private val context: Context) {
         _heartRateHistory.value = loadHeartRateHistory()
         _spo2History.value = loadSpo2History()
         _dailyActivity.value = loadDailyActivity()
-        _activityProbeStatus.value = if (_dailyActivity.value != null) {
-            "Verified activity summary available from the last successful response"
-        } else {
-            "Waiting for verified activity response"
-        }
+        _stepHistory.value = loadStepHistory()
+        _todayStepTotal.value = todaySteps(_stepHistory.value)
+        _activityProbeStatus.value =
+            "Daily steps use verified B2 history; 26 01 is watch-face configuration on this firmware"
         _sleepHistory.value = loadSleepHistory()
         _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
         _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
@@ -376,23 +380,17 @@ class BleGattClient(private val context: Context) {
 
         syncRequested = true
         activityProbeResponseReceived = false
-        _activityProbeStatus.value = "Sync started • waiting for FT_38093 26 01 response"
+        _activityProbeStatus.value = "Sync started • fetching verified B2 step history"
         _syncing.value = true
         _error.value = null
         appendLog("SYNC_START FT_38093 automatic health/history sync")
 
         val now = Calendar.getInstance()
         val syncCommands = fastrackProtocol.buildAutomaticSyncCommands(now)
-        val activityProbeQueued = syncCommands.any {
-            it.payload.contentEquals(byteArrayOf(0x26, 0x01))
-        }
         appendLog(
             "SYNC_PLAN FT_38093 commands=" + syncCommands.size +
-                " activityProbe=" + activityProbeQueued,
+                " activityProbe=false stepHistory=B2",
         )
-        if (activityProbeQueued) {
-            _activityProbeStatus.value = "26 01 queued • waiting for the watch response"
-        }
         syncCommands.forEach { command ->
             val characteristic = when (command.characteristicUuid.lowercase(Locale.ROOT)) {
                 CHAR_33F1_UUID -> channel1
@@ -417,7 +415,7 @@ class BleGattClient(private val context: Context) {
             )
         }
 
-        appendLog("SYNC_PLAN FT_38093 activity probe queued before step/sleep history")
+        appendLog("SYNC_PLAN FT_38093 B2 step history queued before sleep/HR/SpO2 history")
         scheduleSyncCompletionIfIdle()
     }
 
@@ -630,9 +628,12 @@ class BleGattClient(private val context: Context) {
             val stamp = System.currentTimeMillis()
             _lastSyncAt.value = stamp
             dataPrefs.edit().putLong(KEY_LAST_SYNC, stamp).apply()
-            if (!activityProbeResponseReceived) {
-                _activityProbeStatus.value = "No verified 26 01 activity response in this sync"
-            }
+            _activityProbeStatus.value =
+                if (_todayStepTotal.value != null) {
+                    "Verified B2 step history • today=" + _todayStepTotal.value + " steps"
+                } else {
+                    "No verified B2 step-history record for today yet"
+                }
             appendLog("SYNC_COMPLETE FT_38093")
         }
         syncFinishRunnable = runnable
@@ -1062,7 +1063,20 @@ class BleGattClient(private val context: Context) {
                     appendLog("SYNC_DATA battery=" + battery + "%")
                 }
             }
-            0x26 -> decodeDailyActivity(value)
+            0x26 -> {
+                val config = fastrackProtocol.decodeWatchFaceConfig(value)
+                if (config != null) {
+                    appendLog(
+                        "SYNC_DATA watch-face config=" +
+                            config.width + "x" + config.height +
+                            " maxData=" + config.maxDataSize +
+                            " level=" + config.compatibleLevel +
+                            " raw=" + hex(value),
+                    )
+                } else {
+                    appendLog("SYNC_DATA 26 unverified raw=" + hex(value))
+                }
+            }
             0xB2 -> recordStepHistoryPacket(value)
             0x31 -> {
                 if (value.size >= 2 && (value[1].toInt() and 0xFF) == 0x02) {
@@ -1080,9 +1094,45 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun recordStepHistoryPacket(value: ByteArray) {
-        // B2 is retained as raw history evidence. Its FT_38093 record layout
-        // is not independently verified, so it must not populate Today totals.
-        appendLog("SYNC_DATA step-history raw=" + hex(value))
+        if (value.size != 18) {
+            appendLog("SYNC_DATA step-history raw=" + hex(value))
+            return
+        }
+
+        val year = ((value[1].toInt() and 0xFF) shl 8) or (value[2].toInt() and 0xFF)
+        val month = value[3].toInt() and 0xFF
+        val day = value[4].toInt() and 0xFF
+        val hour = value[5].toInt() and 0xFF
+        val totalSteps = ((value[6].toInt() and 0xFF) shl 8) or (value[7].toInt() and 0xFF)
+
+        if (
+            year !in 2020..2100 ||
+            month !in 1..12 ||
+            day !in 1..31 ||
+            hour !in 0..23 ||
+            totalSteps !in 0..100_000
+        ) {
+            appendLog("SYNC_DATA step-history unverified raw=" + hex(value))
+            return
+        }
+
+        val calendar = Calendar.getInstance().apply {
+            clear()
+            set(year, month - 1, day, hour, 0, 0)
+        }
+        val sample = StepHistorySample(
+            epochMillis = calendar.timeInMillis,
+            totalSteps = totalSteps,
+        )
+        _stepHistory.value = mergeStepHistory(_stepHistory.value, listOf(sample))
+        _todayStepTotal.value = todaySteps(_stepHistory.value)
+        persistStepHistory()
+
+        appendLog(
+            "SYNC_DATA step-history date=" + year + "-" + month + "-" + day +
+                " hour=" + hour + " steps=" + totalSteps +
+                " raw=" + hex(value),
+        )
     }
 
     private fun decodeDailyActivity(value: ByteArray) {
@@ -1362,6 +1412,53 @@ class BleGattClient(private val context: Context) {
         }.takeLast(MAX_SPO2_HISTORY)
     }
 
+    private fun persistStepHistory() {
+        val array = JSONArray()
+        _stepHistory.value.forEach { item ->
+            array.put(JSONObject().apply {
+                put("time", item.epochMillis)
+                put("steps", item.totalSteps)
+            })
+        }
+        dataPrefs.edit().putString(KEY_STEP_HISTORY, array.toString()).apply()
+    }
+
+    private fun loadStepHistory(): List<StepHistorySample> {
+        val raw = dataPrefs.getString(KEY_STEP_HISTORY, null) ?: return emptyList()
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val cutoff = System.currentTimeMillis() - STEP_HISTORY_RETENTION_MS
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                val time = item.optLong("time", 0L)
+                val steps = item.optInt("steps", -1)
+                if (time >= cutoff && steps in 0..100_000) {
+                    add(StepHistorySample(time, steps))
+                }
+            }
+        }.sortedBy { it.epochMillis }.takeLast(MAX_STEP_HISTORY)
+    }
+
+    private fun mergeStepHistory(
+        existing: List<StepHistorySample>,
+        incoming: List<StepHistorySample>,
+    ): List<StepHistorySample> {
+        return (existing + incoming)
+            .distinctBy { it.epochMillis }
+            .sortedBy { it.epochMillis }
+            .takeLast(MAX_STEP_HISTORY)
+    }
+
+    private fun todaySteps(samples: List<StepHistorySample>): Int? {
+        val now = Calendar.getInstance()
+        return samples.filter {
+            val c = Calendar.getInstance().apply { timeInMillis = it.epochMillis }
+            c.get(Calendar.ERA) == now.get(Calendar.ERA) &&
+                c.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+                c.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)
+        }.maxOfOrNull { it.totalSteps }
+    }
+
     private fun loadDailyActivity(): DailyActivitySummary? {
         if (dataPrefs.getInt(KEY_ACTIVITY_DECODER_VERSION, 0) != ACTIVITY_DECODER_VERSION) {
             return null
@@ -1618,6 +1715,7 @@ class BleGattClient(private val context: Context) {
         const val KEY_HEART_RATE_HISTORY = "heart_rate_history"
         const val KEY_SPO2_HISTORY = "spo2_history"
         const val KEY_ACTIVITY_TIME = "daily_activity_time"
+        const val KEY_STEP_HISTORY = "step_history"
         const val KEY_STEPS = "daily_steps"
         const val KEY_CALORIES = "daily_calories"
         const val KEY_DISTANCE = "daily_distance"
@@ -1632,6 +1730,8 @@ class BleGattClient(private val context: Context) {
         const val MAX_SPO2_HISTORY = 5_000
         const val KEY_SLEEP_HISTORY = "sleep_history"
         const val MAX_SLEEP_HISTORY = 2_000
+        const val STEP_HISTORY_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
+        const val MAX_STEP_HISTORY = 10_000
         const val SYNC_QUIET_AFTER_QUEUE_MS = 3_000L
         const val SYNC_START_DELAY_MS = 1_000L
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L

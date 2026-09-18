@@ -407,6 +407,8 @@ private fun HistoryScreen(viewModel: MainViewModel) {
     val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
     val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
     val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val todayStepTotal by viewModel.todayStepTotal.collectAsStateWithLifecycle()
+    val stepHistory by viewModel.stepHistory.collectAsStateWithLifecycle()
     val activityProbeStatus by viewModel.activityProbeStatus.collectAsStateWithLifecycle()
     val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
@@ -463,7 +465,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        "Steps and calories stay hidden until a valid FT_38093 response is received.",
+                        "Steps are synced from verified B2 history. Calories and distance are shown only when this firmware exposes a verified source.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -489,15 +491,65 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Steps",
-                            value = dailyActivity?.steps?.toString() ?: "—",
-                            helper = "Synced",
+                            value = todayStepTotal?.toString() ?: "—",
+                            helper = if (todayStepTotal != null) "B2 history" else "Awaiting B2 history",
                         )
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Calories",
-                            value = dailyActivity?.calories?.takeIf { it > 0 }?.toString() ?: "—",
-                            helper = "Verified summary",
+                            value = "—",
+                            helper = "No verified daily calorie field",
                         )
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Activity details",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Distance",
+                            value = "—",
+                            helper = "No verified daily distance packet",
+                        )
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Calories",
+                            value = "—",
+                            helper = "No verified daily calorie packet",
+                        )
+                    }
+                    Text(
+                        "B2 records contain hourly cumulative steps only. The latest FT_38093 26 01 response is a watch-face configuration packet, not activity data.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (stepHistory.isNotEmpty()) {
+                        Text(
+                            "Latest step-history points",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        stepHistory.asReversed().take(8).forEach { sample ->
+                            Text(
+                                formatHistoryTime(sample.epochMillis) + " • " + sample.totalSteps + " steps",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                     }
                 }
             }

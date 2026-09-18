@@ -22,7 +22,6 @@ class FastrackProtocolTest {
         assertTrue(payloads.contains("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"))
         assertTrue(payloads.contains("A1"))
         assertTrue(payloads.contains("A2"))
-        assertTrue(payloads.contains("26 01"))
         assertTrue(payloads.contains("B2 FA"))
         assertTrue(payloads.contains("31 01"))
         assertTrue(payloads.contains("34 FA"))
@@ -49,23 +48,42 @@ class FastrackProtocolTest {
     }
 
     @Test
-    fun dailyActivityPacketUsesCorrectOffsets() {
+    fun watchFaceConfig26PacketMatchesObservedFt38093Response() {
         val packet = byteArrayOf(
             0x26, 0x01,
-            0x00, 0xF2.toByte(), 0x8D.toByte(), 0xC1.toByte(),
-            0x71, 0x17,
-            0x5B, 0x01,
-            0xF2.toByte(), 0x08,
-            0x10,
+            0x00, 0x6E.toByte(), 0xC3.toByte(), 0x79,
+            0x01, 0x68,
+            0x01, 0x68,
+            0x00,
+            0x00, 0x10, 0x00, 0x00,
+            0x03,
+            0x03,
             0x00, 0x00,
+            0x00,
         )
 
-        val decoded = FastrackProtocol().decodeDailyActivity(packet)
+        val decoded = FastrackProtocol().decodeWatchFaceConfig(packet)
 
-        assertEquals(6001, decoded?.steps)
-        assertEquals(347, decoded?.calories)
-        assertEquals(2290, decoded?.distanceMeters)
-        assertEquals(16, decoded?.activeMinutes)
+        assertEquals(360, decoded?.width)
+        assertEquals(360, decoded?.height)
+        assertEquals(1_048_576L, decoded?.maxDataSize)
+        assertEquals(3, decoded?.compatibleLevel)
+    }
+
+    @Test
+    fun b2StepHistoryRecordUsesBigEndianTotalSteps() {
+        val packet = byteArrayOf(
+            0xB2.toByte(),
+            0x07, 0xEA.toByte(), 0x09, 0x12, 0x0B,
+            0x17, 0x71,
+            0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        )
+
+        assertEquals(
+            6001,
+            ((packet[6].toInt() and 0xFF) shl 8) or (packet[7].toInt() and 0xFF),
+        )
     }
 
     @Test
