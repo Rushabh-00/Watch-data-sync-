@@ -496,7 +496,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         sleepHistory.asReversed().take(30).forEach { sample ->
                             Text(
                                 formatHistoryTime(sample.epochMillis) + " • " +
-                                    sleepStageLabel(sample.stage) + " • " +
+                                    "Stage " + sample.stage + " • " +
                                     sample.durationMinutes + " min",
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -539,14 +539,6 @@ private fun HistoryScreen(viewModel: MainViewModel) {
 
 private fun formatHistoryTime(epochMillis: Long): String =
     SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
-
-private fun sleepStageLabel(stage: Int): String = when (stage) {
-    1 -> "Light sleep"
-    2 -> "Deep sleep"
-    3 -> "REM"
-    4 -> "Awake"
-    else -> "Sleep"
-}
 
 private fun sleepSummary(history: List<app.watchdatasync.model.SleepStageSample>): String {
     if (history.isEmpty()) return "—"
