@@ -48,6 +48,7 @@ private enum class FeatureState(
     PHONE_READY("Phone-ready"),
     PENDING("Needs FT_38093 protocol evidence"),
     UNSUPPORTED("Not verified"),
+    DISTRIBUTION_ONLY("Play distribution only"),
 }
 
 private data class FeatureRow(
@@ -86,7 +87,7 @@ private val featureGroups = listOf(
         FeatureRow("Firmware / OTA", "OTA/DFU is intentionally not enabled until a safe, model-specific procedure is observed.", FeatureState.UNSUPPORTED),
     ),
     "Phone & integrations" to listOf(
-        FeatureRow("Notification access", "Android notification access settings and a local notification bridge are available.", FeatureState.PHONE_READY),
+        FeatureRow("Notification relay", "The sideload-safe APK omits notification-listener access. The Play distribution keeps the relay available after Play distribution is configured.", FeatureState.DISTRIBUTION_ONLY),
         FeatureRow("Profile", "Name, birthday, gender, height and weight can be stored locally.", FeatureState.PHONE_READY),
         FeatureRow("Google Fit / Health Connect", "Integration surface is planned; writing vendor health records needs a stable normalized database first.", FeatureState.PENDING),
         FeatureRow("Location / weather", "User-selected location can be used without requiring precise device location.", FeatureState.PHONE_READY),
@@ -100,7 +101,12 @@ fun FeatureHubScreen(viewModel: MainViewModel) {
     val capturedValues by viewModel.values.collectAsStateWithLifecycle()
     var profileOpen by remember { mutableStateOf(false) }
     var goalsOpen by remember { mutableStateOf(false) }
-    var notificationEnabled by remember { mutableStateOf(isNotificationAccessGranted(context)) }
+    var notificationEnabled by remember {
+        mutableStateOf(
+            BuildConfig.NOTIFICATION_BRIDGE_AVAILABLE &&
+                isNotificationAccessGranted(context),
+        )
+    }
     val customFace = remember { mutableStateOf(loadCustomFace(context)) }
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -213,30 +219,43 @@ fun FeatureHubScreen(viewModel: MainViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text("Notifications", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (notificationEnabled) {
-                            "Notification access is enabled. The app can observe phone notifications."
-                        } else {
-                            "Enable notification access to prepare call, SMS and third-party notification bridging."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    if (BuildConfig.NOTIFICATION_BRIDGE_AVAILABLE) {
+                        Text(
+                            if (notificationEnabled) {
+                                "Notification access is enabled. The Play distribution can observe phone notifications for watch relay."
+                            } else {
+                                "Enable notification access to prepare call, SMS and third-party notification bridging."
                             },
-                        ) {
-                            Text(if (notificationEnabled) "Manage access" else "Enable access")
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                                },
+                            ) {
+                                Text(if (notificationEnabled) "Manage access" else "Enable access")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    notificationEnabled = isNotificationAccessGranted(context)
+                                },
+                            ) {
+                                Text("Refresh")
+                            }
                         }
-                        OutlinedButton(
-                            onClick = {
-                                notificationEnabled = isNotificationAccessGranted(context)
-                            },
-                        ) {
-                            Text("Refresh")
-                        }
+                    } else {
+                        Text(
+                            "Notification-listener access is intentionally omitted from this sideload-safe APK because Google Play Protect treats that permission as sensitive for internet-sideloaded apps. The BLE watch-sync functions are unaffected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "The Play distribution variant keeps the notification bridge available.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
