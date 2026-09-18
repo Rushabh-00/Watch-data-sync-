@@ -367,6 +367,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
     val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
     val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
     val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
 
     LazyColumn(
