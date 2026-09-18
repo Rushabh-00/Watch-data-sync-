@@ -1934,7 +1934,7 @@ class BleGattClient(private val context: Context) {
         const val KEY_DISTANCE = "daily_distance"
         const val KEY_ACTIVE_MINUTES = "daily_active_minutes"
         const val KEY_ACTIVITY_DECODER_VERSION = "daily_activity_decoder_version"
-        const val ACTIVITY_DECODER_VERSION = 2
+        const val ACTIVITY_DECODER_VERSION = 3
         const val KEY_BATTERY = "watch_battery"
         const val KEY_LAST_SYNC = "last_sync_at"
         const val HEART_RATE_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
