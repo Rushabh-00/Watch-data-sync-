@@ -1037,6 +1037,13 @@ class BleGattClient(private val context: Context) {
         capturePrefs.edit().remove(CAPTURE_KEY).apply()
     }
 
+    fun markCapture(label: String) {
+        val clean = label.trim().take(40)
+        if (clean.isBlank()) return
+        val stamp = timestamp()
+        appendLog("TEST_MARKER " + stamp + " • " + clean)
+    }
+
     private fun appendLog(line: String) {
         _logs.value = (_logs.value + line).takeLast(5_000)
     }
@@ -1059,8 +1066,8 @@ class BleGattClient(private val context: Context) {
         const val GATT_CONN_TERMINATE_LOCAL_HOST = 22
         const val GATT_CONN_TIMEOUT = 8
 
-        const val MAX_RECONNECT_ATTEMPTS = 2
-        const val RECONNECT_DELAY_MS = 1_500L
+        const val MAX_RECONNECT_ATTEMPTS = 5
+        const val RECONNECT_DELAY_MS = 2_000L
         const val GATT_OPERATION_TIMEOUT_MS = 4_000L
         const val GATT_OPERATION_GAP_MS = 100L
         const val DISCOVERY_TO_GATT_OPERATION_DELAY_MS = 300L
