@@ -27,9 +27,14 @@ It currently:
 
 ## Evidence state
 
-No Fastrack model-specific UUID/packet schema has been verified yet.
+The user's FT_38093 watch has a verified live heart-rate channel:
+- service 000055ff-0000-1000-8000-00805f9b34fb
+- characteristic 000033f2-0000-1000-8000-00805f9b34fb (NOTIFY)
+- observed frame E5 11 00 [BPM], where the fourth byte matches the displayed live heart rate
 
-Standard Bluetooth SIG characteristics are handled only where the watch exposes the corresponding standard service/characteristic. Steps, sleep, workouts, calories and historical vendor records still require an observed model-specific protocol before decoding or syncing them.
+The standard 00002a19 Battery Level value is not trusted for this watch because it reported 100% while the watch showed about 30%. The app therefore hides the battery metric until a watch-specific battery packet is verified.
+
+Steps, SpO2, sleep, workouts, calories and historical vendor records still require observed model-specific protocol evidence before semantic decoding or syncing.
 
 ## Important project assumption
 
@@ -37,13 +42,12 @@ Standard Bluetooth SIG characteristics are handled only where the watch exposes 
 
 ## Next evidence needed
 
-A real watch capture containing:
-- model name
-- service UUIDs
-- notify/write characteristics
-- notification payloads
-- one reproducible history-sync request/response exchange
-- raw packets for each supported history data class
+Use Diagnostics as a capture lab:
+- clear old capture before testing a new measurement
+- inspect generic byte decoding for unknown packets
+- identify the characteristic and packet changes produced by one known watch action or measurement
+- later capture a reproducible history-sync request/response exchange
+- verify raw packets for each supported history data class before assigning metric meanings
 
 ## UI direction
 
