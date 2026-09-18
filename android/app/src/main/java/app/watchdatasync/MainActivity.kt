@@ -143,7 +143,9 @@ private fun HomeScreen(viewModel: MainViewModel) {
         "—"
     }
     val spo2 = if (connected) latestDecoded(values, UUID_SPO2) ?: "—" else "—"
-    val battery = if (connected) latestDecoded(values, UUID_BATTERY) ?: "—" else "—"
+    // The standard Battery Service value is not authoritative for this watch.
+    // Keep it hidden until we observe and verify the FT_38093 battery packet.
+    val battery = "—"
 
     LazyColumn(
         modifier = Modifier
@@ -268,7 +270,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Battery",
                         value = battery,
-                        helper = "Watch BLE • live read",
+                        helper = "Watch protocol",
                     )
                 }
 
@@ -299,7 +301,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Data availability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Heart rate, SpO₂ and battery are shown only while the BLE watch connection is active. FT_38093 heart-rate packets are decoded from the observed vendor BLE channel.",
+                        "Heart rate is live from the verified FT_38093 vendor BLE channel. SpO₂ and battery stay hidden until their watch-specific packets are verified.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
@@ -821,5 +823,4 @@ private fun normalizeMetricLabel(value: String): String =
 
 private const val UUID_HEART_RATE = "00002a37-0000-1000-8000-00805f9b34fb"
 private const val UUID_VENDOR_HEART_RATE = "000033f2-0000-1000-8000-00805f9b34fb"
-private const val UUID_BATTERY = "00002a19-0000-1000-8000-00805f9b34fb"
 private const val UUID_SPO2 = "00002a5f-0000-1000-8000-00805f9b34fb"
