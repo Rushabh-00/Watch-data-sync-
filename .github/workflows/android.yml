@@ -81,7 +81,7 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" --input comment.json
 
       - name: Publish direct APK
-        if: steps.build.outcome == 'success'
+        if: steps.build.conclusion == 'success'
         working-directory: android
         env:
           GH_TOKEN: ${{ github.token }}
