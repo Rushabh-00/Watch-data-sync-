@@ -102,3 +102,13 @@ Current goal for the next continuation:
 - Fix the FT_38093 daily activity decoding so steps, calories and distance match the watch itself.
 - Continue automatic sleep-history synchronization and decoding.
 - Keep the app on main only; do not create/use a dev branch.
+
+ 
+## FT_38093 activity/sleep protocol correction — 2026-09-18 continuation
+
+- The previous 50030-step / 377-calorie result came from the earlier daily-activity decoder reading the four-byte flags field as part of the metrics. Matching protocol evidence documents `26 01` as a four-byte flags field followed by little-endian 16-bit Steps, Calories and Distance, then Active Minutes. The captured reference packet `26 01 00 F2 8D C1 01 40 01 7C 01 00 10 ...` therefore maps to 320 steps, 380 kcal, 256 m and 16 active minutes; the corrected field offsets are bytes 6-7, 8-9, 10-11 and 12.
+- The FT_38093 implementation now requests `26 01` again and decodes only those documented fields. Raw activity response bytes remain in the rolling diagnostic capture and the sync log.
+- B2 step-history packets are no longer allowed to overwrite the authoritative Today summary because their full FT_38093 layout is not independently verified in this project. They remain captured as raw evidence.
+- Existing persisted activity data is invalidated by an activity-decoder schema version, preventing the old 50030/377 values from being shown after upgrade. A new verified `26 01` response must repopulate Today.
+- Sleep: `31 01` produces session/date markers, followed by `0x32` sleep packets on the channel-2 notification path. The observed matching capture shows `0x32` as repeated five-byte records after the opcode: `HH, mm, stage, duration_hi, duration_lo`. The decoder now parses that layout and `31 02` marks transfer completion.
+- The next FT_38093 hardware validation must compare the new `26 01` values with the watch display (target observation was about 6001 steps, 347 Cal, 2.29 km) and confirm that real `0x32` sleep-stage records populate History. Until that hardware run, those target values remain validation targets, not claims of current app output.

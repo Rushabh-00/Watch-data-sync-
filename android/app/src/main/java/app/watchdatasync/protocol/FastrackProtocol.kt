@@ -46,6 +46,21 @@ class FastrackProtocol : WatchProtocol {
         val settleDelayMs: Long = 500L,
     )
 
+    data class DailyActivityRecord(
+        val steps: Int,
+        val calories: Int,
+        val distanceMeters: Int,
+        val activeMinutes: Int,
+        val flags: Long,
+    )
+
+    data class SleepStageRecord(
+        val hour: Int,
+        val minute: Int,
+        val stage: Int,
+        val durationMinutes: Int,
+    )
+
     fun buildAutomaticSyncCommands(now: Calendar): List<Command> {
         val sevenDaysAgo = (now.clone() as Calendar).apply {
             add(Calendar.DAY_OF_YEAR, -7)
@@ -95,6 +110,13 @@ class FastrackProtocol : WatchProtocol {
                 settleDelayMs = 600L,
             ),
             Command(
+                label = "Sync daily activity summary",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("26 01"),
+                writeWithoutResponse = false,
+                settleDelayMs = 2_000L,
+            ),
+            Command(
                 label = "Query step and sleep status",
                 characteristicUuid = CHAR_33F1_UUID,
                 payload = hex("AA"),
@@ -113,7 +135,7 @@ class FastrackProtocol : WatchProtocol {
                 characteristicUuid = CHAR_33F1_UUID,
                 payload = hex("31 01"),
                 writeWithoutResponse = false,
-                settleDelayMs = 1_000L,
+                settleDelayMs = 5_000L,
             ),
             Command(
                 label = "Sync heart-rate history",
@@ -137,7 +159,9 @@ class FastrackProtocol : WatchProtocol {
         packet: ByteArray,
     ): String? {
         val uuid = characteristicUuid.lowercase(Locale.ROOT)
-        if (uuid != CHAR_33F2_UUID || packet.isEmpty()) {
+        if (packet.isEmpty() ||
+            (uuid != CHAR_33F2_UUID && uuid != CHAR_34F2_UUID)
+        ) {
             return null
         }
 
@@ -154,6 +178,31 @@ class FastrackProtocol : WatchProtocol {
                 return "Heart rate $bpm bpm"
             }
             return "Heart-rate frame • raw value $bpm • no valid live BPM"
+        }
+
+        if (b0 == 0x26) {
+            val activity = decodeDailyActivity(packet)
+            if (activity != null) {
+                return "FT_38093 daily activity • steps=" + activity.steps +
+                    " • calories=" + activity.calories + " kcal" +
+                    " • distance=" + activity.distanceMeters + " m" +
+                    " • active=" + activity.activeMinutes + " min"
+            }
+        }
+
+        if (b0 == 0x32) {
+            val sleep = decodeSleepStage(packet)
+            if (sleep != null) {
+                return "FT_38093 sleep stage • " +
+                    String.format(
+                        Locale.US,
+                        "%02d:%02d • stage=%d • %d min",
+                        sleep.hour,
+                        sleep.minute,
+                        sleep.stage,
+                        sleep.durationMinutes,
+                    )
+            }
         }
 
         if (b0 == 0x44) {
@@ -189,6 +238,71 @@ class FastrackProtocol : WatchProtocol {
 
         return null
     }
+
+    fun decodeDailyActivity(packet: ByteArray): DailyActivityRecord? {
+        if (packet.size < 13) return null
+        if ((packet[0].toInt() and 0xFF) != 0x26 || (packet[1].toInt() and 0xFF) != 0x01) {
+            return null
+        }
+
+        val flags =
+            (packet[2].toLong() and 0xFFL) or
+                ((packet[3].toLong() and 0xFFL) shl 8) or
+                ((packet[4].toLong() and 0xFFL) shl 16) or
+                ((packet[5].toLong() and 0xFFL) shl 24)
+        val steps = leU16(packet, 6)
+        val calories = leU16(packet, 8)
+        val distanceMeters = leU16(packet, 10)
+        val activeMinutes = packet[12].toInt() and 0xFF
+
+        if (steps !in 0..100_000) return null
+        if (calories !in 0..10_000) return null
+        if (distanceMeters !in 0..100_000) return null
+        if (activeMinutes !in 0..1_440) return null
+
+        return DailyActivityRecord(
+            steps = steps,
+            calories = calories,
+            distanceMeters = distanceMeters,
+            activeMinutes = activeMinutes,
+            flags = flags,
+        )
+    }
+
+    fun decodeSleepStage(packet: ByteArray): SleepStageRecord? {
+        if (packet.size < 6 || (packet.size - 1) % 5 != 0) return null
+        if ((packet[0].toInt() and 0xFF) != 0x32) return null
+
+        val offset = 1
+        val hour = packet[offset].toInt() and 0xFF
+        val minute = packet[offset + 1].toInt() and 0xFF
+        val stage = packet[offset + 2].toInt() and 0xFF
+        val durationMinutes = beU16(packet, offset + 3)
+
+        if (
+            hour !in 0..23 ||
+            minute !in 0..59 ||
+            stage !in 1..4 ||
+            durationMinutes !in 1..720
+        ) {
+            return null
+        }
+
+        return SleepStageRecord(
+            hour = hour,
+            minute = minute,
+            stage = stage,
+            durationMinutes = durationMinutes,
+        )
+    }
+
+    private fun leU16(value: ByteArray, offset: Int): Int =
+        (value[offset].toInt() and 0xFF) or
+            ((value[offset + 1].toInt() and 0xFF) shl 8)
+
+    private fun beU16(value: ByteArray, offset: Int): Int =
+        ((value[offset].toInt() and 0xFF) shl 8) or
+            (value[offset + 1].toInt() and 0xFF)
 
     override fun describe(packet: ByteArray): String =
         "Fastrack packet: " + packet.joinToString(" ") {

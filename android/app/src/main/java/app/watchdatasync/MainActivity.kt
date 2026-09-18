@@ -165,6 +165,14 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val calories = dailyActivity?.calories
         ?.takeIf { it > 0 }
         ?.toString() ?: "—"
+    val distance = dailyActivity?.distanceMeters
+        ?.takeIf { it > 0 }
+        ?.let { formatDistanceMeters(it) }
+        ?: "—"
+    val activeMinutes = dailyActivity?.activeMinutes
+        ?.takeIf { it > 0 }
+        ?.let { "$it min" }
+        ?: "—"
     val lastSyncLabel = lastSyncAt?.let {
         SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(it))
     } ?: "Never"
@@ -300,15 +308,15 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 ) {
                     MetricCard(
                         modifier = Modifier.weight(1f),
-                        title = "Workouts",
-                        value = "—",
-                        helper = "Watch protocol",
+                        title = "Distance",
+                        value = distance,
+                        helper = "Watch reported",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
-                        title = "Activity",
-                        value = "—",
-                        helper = "Watch protocol",
+                        title = "Active time",
+                        value = activeMinutes,
+                        helper = "Watch reported",
                     )
                 }
             }
@@ -414,8 +422,8 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         MetricCard(
                             modifier = Modifier.weight(1f),
                             title = "Calories",
-                            value = dailyActivity?.calories?.toString() ?: "—",
-                            helper = "Synced",
+                            value = dailyActivity?.calories?.takeIf { it > 0 }?.toString() ?: "—",
+                            helper = "Verified summary",
                         )
                     }
                 }
@@ -541,6 +549,9 @@ private fun HistoryScreen(viewModel: MainViewModel) {
 
 private fun formatHistoryTime(epochMillis: Long): String =
     SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
+
+private fun formatDistanceMeters(meters: Int): String =
+    String.format(Locale.US, "%.2f km", meters / 1000.0)
 
 private fun sleepSummary(history: List<app.watchdatasync.model.SleepStageSample>): String {
     if (history.isEmpty()) return "—"

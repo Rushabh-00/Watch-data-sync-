@@ -22,10 +22,10 @@ class FastrackProtocolTest {
         assertTrue(payloads.contains("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"))
         assertTrue(payloads.contains("A1"))
         assertTrue(payloads.contains("A2"))
+        assertTrue(payloads.contains("26 01"))
         assertTrue(payloads.contains("B2 FA"))
         assertTrue(payloads.contains("31 01"))
         assertTrue(payloads.contains("34 FA"))
-        assertTrue(payloads.contains("B2 FA"))
     }
 
     @Test
@@ -44,6 +44,42 @@ class FastrackProtocolTest {
             "F7 FA 07 EA 09 0B 12 29",
             hrHistory.toHex(),
         )
+    }
+
+    @Test
+    fun dailyActivityPacketUsesCorrectOffsets() {
+        val packet = byteArrayOf(
+            0x26, 0x01,
+            0x00, 0xF2.toByte(), 0x8D.toByte(), 0xC1.toByte(),
+            0x71, 0x17,
+            0x5B, 0x01,
+            0xF2.toByte(), 0x08,
+            0x10,
+            0x00, 0x00,
+        )
+
+        val decoded = FastrackProtocol().decodeDailyActivity(packet)
+
+        assertEquals(6001, decoded?.steps)
+        assertEquals(347, decoded?.calories)
+        assertEquals(2290, decoded?.distanceMeters)
+        assertEquals(16, decoded?.activeMinutes)
+    }
+
+    @Test
+    fun sleepStagePacketMatchesObservedFiveByteRecordLayout() {
+        val packet = byteArrayOf(
+            0x32,
+            0x17, 0x0F, 0x02,
+            0x00, 0x0C,
+        )
+
+        val decoded = FastrackProtocol().decodeSleepStage(packet)
+
+        assertEquals(23, decoded?.hour)
+        assertEquals(15, decoded?.minute)
+        assertEquals(2, decoded?.stage)
+        assertEquals(12, decoded?.durationMinutes)
     }
 
     @Test

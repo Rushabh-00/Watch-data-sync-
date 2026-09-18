@@ -1008,8 +1008,16 @@ class BleGattClient(private val context: Context) {
                     appendLog("SYNC_DATA battery=" + battery + "%")
                 }
             }
-            0xB2 -> decodeStepsHistory(value)
-            0x31 -> rememberSleepSession(value)
+            0x26 -> decodeDailyActivity(value)
+            0xB2 -> recordStepHistoryPacket(value)
+            0x31 -> {
+                if (value.size >= 2 && (value[1].toInt() and 0xFF) == 0x02) {
+                    sleepSessionDate = null
+                    appendLog("SYNC_DATA sleep history complete")
+                } else {
+                    rememberSleepSession(value)
+                }
+            }
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
             0x32 -> decodeSleepStage(value)
@@ -1017,54 +1025,34 @@ class BleGattClient(private val context: Context) {
         }
     }
 
-    private fun decodeStepsHistory(value: ByteArray) {
-        // Verified GloryFit-family layout:
-        // B2 yyyy MM dd HH total16 runStart runEnd reserved run16 walkStart walkEnd reserved walk16
-        if (value.size != 18) return
+    private fun recordStepHistoryPacket(value: ByteArray) {
+        // B2 is retained as raw history evidence. Its FT_38093 record layout
+        // is not independently verified, so it must not populate Today totals.
+        appendLog("SYNC_DATA step-history raw=" + hex(value))
+    }
 
-        val year = ((value[1].toInt() and 0xFF) shl 8) or (value[2].toInt() and 0xFF)
-        val month = value[3].toInt() and 0xFF
-        val day = value[4].toInt() and 0xFF
-        val hour = value[5].toInt() and 0xFF
-        val totalSteps = beU16(value, 6)
-        if (
-            year !in 2020..2100 ||
-            month !in 1..12 ||
-            day !in 1..31 ||
-            hour !in 0..23 ||
-            totalSteps !in 0..100_000
-        ) return
-
-        val calendar = Calendar.getInstance().apply {
-            clear()
-            set(year, month - 1, day, hour, 0, 0)
+    private fun decodeDailyActivity(value: ByteArray) {
+        val activity = fastrackProtocol.decodeDailyActivity(value) ?: run {
+            appendLog("SYNC_DATA activity unverified raw=" + hex(value))
+            return
         }
 
-        // B2 is an hourly cumulative record. The latest record for today is the
-        // watch's current total; never treat the 16-bit run/walk fields as calories
-        // or distance.
         val summary = DailyActivitySummary(
-            epochMillis = calendar.timeInMillis,
-            steps = totalSteps,
-            calories = 0,
-            distanceMeters = 0,
-            activeMinutes = 0,
+            epochMillis = System.currentTimeMillis(),
+            steps = activity.steps,
+            calories = activity.calories,
+            distanceMeters = activity.distanceMeters,
+            activeMinutes = activity.activeMinutes,
         )
-        val current = _dailyActivity.value
-        if (
-            current == null ||
-            calendar.timeInMillis >= current.epochMillis
-        ) {
-            _dailyActivity.value = summary
-            persistDailyActivity(summary)
-        }
 
+        _dailyActivity.value = summary
+        persistDailyActivity(summary)
         appendLog(
-            "SYNC_DATA steps=" + totalSteps +
-                " at " + year + "-" +
-                month.toString().padStart(2, '0') + "-" +
-                day.toString().padStart(2, '0') + " " +
-                hour.toString().padStart(2, '0') + ":00",
+            "SYNC_DATA activity=" + activity.steps + " steps, " +
+                activity.calories + " kcal, " +
+                activity.distanceMeters + " m, " +
+                activity.activeMinutes + " min" +
+                " raw=" + hex(value),
         )
     }
 
@@ -1165,40 +1153,49 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun decodeSleepStage(value: ByteArray) {
-        // 32 <HH mm stage 01 dur16> repeated on 34F2.
-        if (value.size < 7 || ((value.size - 1) % 6 != 0)) return
-        val session = sleepSessionDate ?: return
+        // 0x32 records are [HH][mm][stage][duration_hi][duration_lo].
+        // Multiple five-byte records may be concatenated after the opcode.
+        if (value.size < 6 || (value.size - 1) % 5 != 0) return
+
+        val session = sleepSessionDate ?: run {
+            appendLog("SYNC_DATA sleep stage without session raw=" + hex(value))
+            return
+        }
+
         val sessionDay = session.get(Calendar.DAY_OF_MONTH)
         val sessionMonth = session.get(Calendar.MONTH)
         val sessionYear = session.get(Calendar.YEAR)
 
         val samples = buildList {
-            for (offset in 1 until value.size step 6) {
+            for (offset in 1 until value.size step 5) {
                 val hour = value[offset].toInt() and 0xFF
                 val minute = value[offset + 1].toInt() and 0xFF
                 val stage = value[offset + 2].toInt() and 0xFF
-                val marker = value[offset + 3].toInt() and 0xFF
-                val duration = beU16(value, offset + 4)
+                val durationMinutes =
+                    ((value[offset + 3].toInt() and 0xFF) shl 8) or
+                        (value[offset + 4].toInt() and 0xFF)
+
                 if (
                     hour !in 0..23 ||
                     minute !in 0..59 ||
                     stage !in 1..4 ||
-                    marker != 0x01 ||
-                    duration <= 0
-                ) continue
+                    durationMinutes !in 1..720
+                ) {
+                    continue
+                }
 
-                // Sleep segments after noon belong to the previous calendar day.
                 val dayOffset = if (hour >= 12) -1 else 0
                 val calendar = Calendar.getInstance().apply {
                     clear()
                     set(sessionYear, sessionMonth, sessionDay, hour, minute, 0)
                     add(Calendar.DAY_OF_YEAR, dayOffset)
                 }
+
                 add(
                     SleepStageSample(
                         epochMillis = calendar.timeInMillis,
                         stage = stage,
-                        durationMinutes = duration,
+                        durationMinutes = durationMinutes,
                     ),
                 )
             }
@@ -1210,7 +1207,7 @@ class BleGattClient(private val context: Context) {
                 .sortedBy { it.epochMillis }
                 .takeLast(MAX_SLEEP_HISTORY)
             persistSleepHistory()
-            appendLog("SYNC_DATA sleep stages=" + samples.size)
+            appendLog("SYNC_DATA sleep stages=" + samples.size + " raw=" + hex(value))
         }
     }
 
@@ -1242,13 +1239,6 @@ class BleGattClient(private val context: Context) {
         }.sortedBy { it.epochMillis }.takeLast(MAX_SLEEP_HISTORY)
     }
 
-    private fun beU16(value: ByteArray, offset: Int): Int =
-        ((value[offset].toInt() and 0xFF) shl 8) or
-            (value[offset + 1].toInt() and 0xFF)
-
-    private fun leU16(value: ByteArray, offset: Int): Int =
-        (value[offset].toInt() and 0xFF) or ((value[offset + 1].toInt() and 0xFF) shl 8)
-
     private fun mergeHeartRateHistory(existing: List<HeartRateHistorySample>, incoming: List<HeartRateHistorySample>): List<HeartRateHistorySample> =
         (existing + incoming).distinctBy { it.epochMillis }.filter {
             it.epochMillis >= System.currentTimeMillis() - HEART_RATE_RETENTION_MS
@@ -1277,6 +1267,7 @@ class BleGattClient(private val context: Context) {
 
     private fun persistDailyActivity(summary: DailyActivitySummary) {
         dataPrefs.edit()
+            .putInt(KEY_ACTIVITY_DECODER_VERSION, ACTIVITY_DECODER_VERSION)
             .putLong(KEY_ACTIVITY_TIME, summary.epochMillis)
             .putInt(KEY_STEPS, summary.steps)
             .putInt(KEY_CALORIES, summary.calories)
@@ -1314,6 +1305,10 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun loadDailyActivity(): DailyActivitySummary? {
+        if (dataPrefs.getInt(KEY_ACTIVITY_DECODER_VERSION, 0) != ACTIVITY_DECODER_VERSION) {
+            return null
+        }
+
         val time = dataPrefs.getLong(KEY_ACTIVITY_TIME, 0L)
         if (time <= 0L) return null
         return DailyActivitySummary(
@@ -1569,6 +1564,8 @@ class BleGattClient(private val context: Context) {
         const val KEY_CALORIES = "daily_calories"
         const val KEY_DISTANCE = "daily_distance"
         const val KEY_ACTIVE_MINUTES = "daily_active_minutes"
+        const val KEY_ACTIVITY_DECODER_VERSION = "daily_activity_decoder_version"
+        const val ACTIVITY_DECODER_VERSION = 2
         const val KEY_BATTERY = "watch_battery"
         const val KEY_LAST_SYNC = "last_sync_at"
         const val HEART_RATE_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
