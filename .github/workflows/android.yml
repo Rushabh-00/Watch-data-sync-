@@ -55,13 +55,9 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Run JVM tests
+      - name: Test and build release APK
         working-directory: android
-        run: gradle test --configuration-cache --build-cache --parallel
-
-      - name: Build release APK
-        working-directory: android
-        run: gradle assembleRelease --configuration-cache --build-cache --parallel
+        run: gradle test assembleRelease --configuration-cache --build-cache --parallel
 
       - name: Sign release APK
         env:
