@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class BleScanner(context: Context) {
     private var preferredAddress: String? = null
+    private var autoConnectFirst = false
     var onCompatibleDeviceFound: ((WatchDevice) -> Unit)? = null
 
     private val adapter: BluetoothAdapter? =
@@ -30,6 +31,7 @@ class BleScanner(context: Context) {
     @SuppressLint("MissingPermission")
     fun start(preferredAddress: String? = null, autoConnectFirst: Boolean = false) {
         this.preferredAddress = preferredAddress
+        this.autoConnectFirst = autoConnectFirst
         val bleScanner = scanner ?: return
         _devices.value = emptyList()
 
