@@ -604,9 +604,9 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                     }
 
                     Text(
-                        "Heart-rate packets are intentionally omitted. " +
-                            "Unknown packets are retained for 24 hours and shown in a human-readable capture view. " +
-                            "Copy log exports the non-heart-rate evidence.",
+                        "Discovery mode keeps only unknown/vendor evidence. " +
+                            "Verified heart-rate and untrusted standard battery packets are omitted. " +
+                            "The rolling capture is retained for 24 hours for protocol investigation.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -680,7 +680,7 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         logs.takeLast(120)
-                            .filterNot(::isHeartRateLog)
+                            .filterNot(::isDiscoveryNoiseLog)
                             .map(::humanReadableLogLine)
                             .forEach { line ->
                                 Text(
@@ -700,7 +700,7 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        "Decoded capture",
+                        "Unknown data capture",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -710,17 +710,17 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                         .distinct()
                         .size
                     Text(
-                        "Rolling 24-hour capture • " + nonHeartRate.size +
+                        "Rolling 24-hour discovery • " + nonHeartRate.size +
                             " packets • " + characteristicCount + " active data channels",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
                         if (connected) {
-                            "Keep the watch connected while opening one watch feature at a time " +
-                                "(SpO₂, sleep, stress, steps, workout). Clear capture before each test."
+                            "Open one feature at a time: SpO₂, sleep, stress, steps or workout. " +
+                                "Clear capture before a test, then leave the watch connected to capture its packets."
                         } else {
-                            "Reconnect the bound watch to continue passive protocol capture."
+                            "The bound watch reconnects automatically. Reconnect it to continue passive capture."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -764,6 +764,9 @@ private fun isHeartRateLog(line: String): Boolean {
     return lower.contains(UUID_HEART_RATE) ||
         (lower.contains(UUID_VENDOR_HEART_RATE) && lower.contains("e5 11 00"))
 }
+
+private fun isDiscoveryNoiseLog(line: String): Boolean =
+    isHeartRateLog(line) || line.startsWith("BATTERY standard packet omitted")
 
 private fun humanReadableLogLine(line: String): String {
     val lower = line.lowercase(Locale.ROOT)
@@ -842,7 +845,7 @@ private fun buildDiagnosticsClipboardText(
     }
 
     appendLine()
-    val readableLogs = logs.filterNot(::isHeartRateLog)
+    val readableLogs = logs.filterNot(::isDiscoveryNoiseLog)
     appendLine("HUMAN-READABLE EVENT LOG (" + readableLogs.size + " events)")
     readableLogs.map(::humanReadableLogLine).filter { it.isNotBlank() }.forEach(::appendLine)
 }
