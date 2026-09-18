@@ -1,6 +1,9 @@
 package app.watchdatasync
 
 import android.Manifest
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -45,6 +48,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -533,6 +537,8 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
     val services by viewModel.services.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
     val logs by viewModel.logs.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -540,21 +546,6 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(
-                    onClick = viewModel::clearCapture,
-                ) {
-                    Text("Clear capture")
-                }
-                Text(
-                    "Clear old packets before testing a new measurement. Unknown packets use generic byte decoding only; no metric label is guessed.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
         item {
             Text(
                 text = "Diagnostics",
@@ -569,8 +560,68 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
 
         item {
             Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Services and characteristics", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = {
+                                val clipboard =
+                                    context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(
+                                    ClipData.newPlainText(
+                                        "Watch Data Sync diagnostics",
+                                        buildDiagnosticsClipboardText(
+                                            connected = connected,
+                                            services = services,
+                                            values = values,
+                                            logs = logs,
+                                        ),
+                                    ),
+                                )
+                                copied = true
+                            },
+                        ) {
+                            Text(if (copied) "Copied" else "Copy log")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                copied = false
+                                viewModel.clearCapture()
+                            },
+                        ) {
+                            Text("Clear capture")
+                        }
+                    }
+
+                    Text(
+                        "Capture keeps up to 5,000 packets and 5,000 log lines. " +
+                            "Unknown packets are automatically decoded into numeric/text candidates; " +
+                            "metric names are only added when verified.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "Services and characteristics",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+
                     if (services.isEmpty()) {
                         Text(
                             "Connect a watch to inspect its GATT layout.",
@@ -581,8 +632,12 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                             Text(service.uuid, fontWeight = FontWeight.Medium)
                             service.characteristics.forEach { characteristic ->
                                 Text(
-                                    characteristic.uuid + " • " + characteristic.properties.joinToString(" / "),
-                                    modifier = Modifier.padding(start = 8.dp, bottom = 4.dp),
+                                    characteristic.uuid + " • " +
+                                        characteristic.properties.joinToString(" / "),
+                                    modifier = Modifier.padding(
+                                        start = 8.dp,
+                                        bottom = 4.dp,
+                                    ),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
@@ -595,10 +650,23 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
 
         item {
             Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Raw event log", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        logs.takeLast(40).joinToString("\n").ifBlank { "No events yet." },
+                        "Raw event log",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Showing latest " + minOf(logs.size, 300) + " of " + logs.size +
+                            " lines. Copy log exports the full capture.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        logs.takeLast(300).joinToString("\n").ifBlank { "No events yet." },
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -607,21 +675,88 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
 
         item {
             Card {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Captured values", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Column(
+                    Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        "Total captured: " + values.size,
-                        style = MaterialTheme.typography.bodyMedium,
+                        "Decoded capture",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Raw packets stay visible here so model-specific protocol decoding can be verified from observed bytes.",
+                        "Showing latest " + minOf(values.size, 60) + " of " + values.size +
+                            " captured packets.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+
+                    values.asReversed().take(60).forEach { value ->
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Text(
+                                value.characteristicUuid,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                value.timestamp + " • HEX " + value.hex,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                value.decoded ?: "No decoder output",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Divider(Modifier.padding(vertical = 5.dp))
+                        }
+                    }
+
+                    if (values.isEmpty()) {
+                        Text(
+                            "No captured packets yet.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+private fun buildDiagnosticsClipboardText(
+    connected: Boolean,
+    services: List<app.watchdatasync.model.GattService>,
+    values: List<GattValue>,
+    logs: List<String>,
+): String = buildString {
+    appendLine("WATCH DATA SYNC DIAGNOSTICS")
+    appendLine("Connected: " + connected)
+    appendLine()
+    appendLine("SERVICES / CHARACTERISTICS")
+    services.forEach { service ->
+        appendLine(service.uuid)
+        service.characteristics.forEach { characteristic ->
+            appendLine(
+                "  " + characteristic.uuid + " • " +
+                    characteristic.properties.joinToString(" / "),
+            )
+        }
+    }
+    appendLine()
+    appendLine("CAPTURED VALUES (" + values.size + ")")
+    values.forEach { value ->
+        appendLine(
+            value.timestamp + " • " +
+                value.serviceUuid + " • " +
+                value.characteristicUuid + " • HEX=" +
+                value.hex + " • ASCII=" + value.ascii,
+        )
+        appendLine("  DECODER=" + (value.decoded ?: "—"))
+    }
+    appendLine()
+    appendLine("RAW EVENT LOG (" + logs.size + ")")
+    logs.forEach(::appendLine)
 }
 
 @Composable
