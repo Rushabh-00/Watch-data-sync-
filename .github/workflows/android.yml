@@ -74,14 +74,19 @@ jobs:
           import json
           from pathlib import Path
           log = Path("build.log").read_text(errors="replace")
-          tail = "\n".join(log.splitlines()[-160:])
-          body = "### Android build failure\n\nCommit: " + "${{ github.sha }}" + "\n\n```text\n" + tail + "\n```"
+          lines = log.splitlines()
+          errors = [
+              line for line in lines
+              if "e: " in line.lower() or "error:" in line.lower() or "exception:" in line.lower()
+          ]
+          snippet = "\n".join((errors[-120:] + ["", "---- tail ----"] + lines[-80:]))
+          body = "### Android build failure\n\nCommit: " + "${{ github.sha }}" + "\n\n```text\n" + snippet + "\n```"
           Path("comment.json").write_text(json.dumps({"body": body}))
           PY
           gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" --input comment.json
 
       - name: Publish direct APK
-        if: steps.build.conclusion == 'success'
+        if: steps.build.outcome == 'success'
         working-directory: android
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,3 +113,7 @@ jobs:
           echo "## Direct APK" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "[Download WatchDataSync-debug.apk](https://github.com/${{ github.repository }}/releases/download/latest/${NAME})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail workflow after build failure
+        if: steps.build.outcome == 'failure'
+        run: exit 1
