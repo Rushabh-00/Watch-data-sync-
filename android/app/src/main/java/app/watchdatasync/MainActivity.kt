@@ -476,6 +476,8 @@ private fun HistoryScreen(viewModel: MainViewModel) {
     val activityProbeStatus by viewModel.activityProbeStatus.collectAsStateWithLifecycle()
     val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
+    val nowMillis = System.currentTimeMillis()
+    val todayActivity = dailyActivity?.takeIf { isSameLocalDay(it.epochMillis, nowMillis) }
 
     LazyColumn(
         modifier = Modifier
@@ -529,7 +531,7 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Text(
-                        "Steps are synced from verified B2 history. Calories and distance are shown only when this firmware exposes a verified source.",
+                        "Steps use verified B1/B2 records. Calories, distance and active time appear only after a verified activity packet is received.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -617,6 +619,36 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                     }
                 }
             }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                DailyBarChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Steps",
+                    subtitle = "7-day daily totals",
+                    points = buildDailyStepPoints(stepHistory, nowMillis),
+                    barColor = MaterialTheme.colorScheme.primary,
+                    valueLabel = { String.format(Locale.US, "%.0f", it) },
+                    emptyMessage = "No step-history days yet.",
+                )
+                DailyBarChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Sleep",
+                    subtitle = "7-day verified duration",
+                    points = buildDailySleepPoints(sleepHistory, nowMillis),
+                    barColor = MaterialTheme.colorScheme.secondary,
+                    valueLabel = ::formatMinutesFloat,
+                    emptyMessage = "No sleep-stage days yet.",
+                )
+            }
+        }
+
+        item {
+            SleepTrendCard(sleepHistory)
         }
 
         item {
