@@ -26,8 +26,11 @@ It currently:
 - keeps raw GATT data visible for protocol discovery
 - automatically remembers the selected FT_38093 watch and attempts to reconnect it on app start
 - scanner filters discovery to the target FT_38093/Fastrack watch instead of showing arbitrary BLE peripherals
-- excludes already-verified heart-rate packets from protocol-discovery capture while keeping live heart rate in the normal app UI
-- retains unknown/non-heart-rate captures locally for up to 24 hours for protocol investigation
+- excludes already-verified heart-rate packets from protocol-discovery capture and diagnostics logs while keeping live heart rate in the normal app UI
+- omits the untrusted standard battery packet from discovery capture
+- retains unknown/non-heart-rate captures locally for up to 24 hours for protocol investigation, including across app restarts
+- provides feature capture markers for SpO₂, sleep, stress, steps, workout and history-sync tests
+- keeps the selected FT_38093 watch bound by address, discovers only the target watch family, and auto-reconnects the bound watch with multiple retry attempts
 
 ## Evidence state
 
