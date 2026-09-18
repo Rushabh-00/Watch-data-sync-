@@ -1,21 +1,22 @@
 package app.watchdatasync.protocol
 
+import java.util.Calendar
 import java.util.Locale
 
 /**
- * Decoder for the BLE protocol family observed on the user's FT_38093 watch.
+ * Protocol-family adapter for the observed FT_38093 / GloryFit-style BLE layout.
  *
- * Evidence used by this adapter:
- * - service 000055ff-0000-1000-8000-00805f9b34fb
- * - characteristic 000033f1-0000-1000-8000-00805f9b34fb (WRITE / READ)
- * - characteristic 000033f2-0000-1000-8000-00805f9b34fb (NOTIFY)
- * - live notification frame E5 11 00 [BPM] on 000033f2
+ * Direct FT_38093 evidence in this project:
+ * - 000055ff / 000033f1 + 000033f2
+ * - 000056ff / 000034f1 + 000034f2
+ * - live E5 11 00 [BPM] frames on 33f2
  *
- * Only fields with an observed packet layout are decoded here.
+ * The sync command set below is derived from the matching public reverse-engineered
+ * protocol family. The app only enables it after the FT_38093 GATT layout is observed.
  */
 class FastrackProtocol : WatchProtocol {
     override val id: String = "fastrack-ft38093"
-    override val displayName: String = "Fastrack FT_38093 live protocol"
+    override val displayName: String = "Fastrack FT_38093 sync protocol"
 
     override fun matches(
         advertisedName: String?,
@@ -32,14 +33,96 @@ class FastrackProtocol : WatchProtocol {
         val normalizedCharacteristics =
             characteristicUuids.map { it.lowercase(Locale.ROOT) }.toSet()
 
-        /*
-         * The screenshots show the 55ff service plus the 33f1/33f2 channel.
-         * Other discovered services use a different 3c17-d293-8e48-14fe2e4da212
-         * base and are not required to identify the live heart-rate channel.
-         */
         return SERVICE_55FF_UUID in normalizedServices &&
             CHAR_33F1_UUID in normalizedCharacteristics &&
             CHAR_33F2_UUID in normalizedCharacteristics
+    }
+
+    data class Command(
+        val label: String,
+        val characteristicUuid: String,
+        val payload: ByteArray,
+        val writeWithoutResponse: Boolean,
+        val settleDelayMs: Long = 500L,
+    )
+
+    fun buildAutomaticSyncCommands(now: Calendar): List<Command> {
+        val sevenDaysAgo = (now.clone() as Calendar).apply {
+            add(Calendar.DAY_OF_YEAR, -7)
+        }
+
+        return listOf(
+            Command(
+                label = "Channel 1 handshake",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("08 08 44 2A 01 24 39 43 75 6F FF FE D9 21 00 5F 78 4B E1 DC"),
+                writeWithoutResponse = false,
+                settleDelayMs = 700L,
+            ),
+            Command(
+                label = "Channel 2 init",
+                characteristicUuid = CHAR_34F1_UUID,
+                payload = hex("00 F4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 04 02"),
+                writeWithoutResponse = true,
+                settleDelayMs = 700L,
+            ),
+            Command(
+                label = "Sync watch clock",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = syncTimeCommand(now),
+                writeWithoutResponse = false,
+                settleDelayMs = 600L,
+            ),
+            Command(
+                label = "Request serial",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("A1"),
+                writeWithoutResponse = false,
+                settleDelayMs = 600L,
+            ),
+            Command(
+                label = "Request watch battery",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("A2"),
+                writeWithoutResponse = false,
+                settleDelayMs = 600L,
+            ),
+            Command(
+                label = "Request watch status",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("BB"),
+                writeWithoutResponse = false,
+                settleDelayMs = 600L,
+            ),
+            Command(
+                label = "Sync today's activity",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("26 01"),
+                writeWithoutResponse = false,
+                settleDelayMs = 900L,
+            ),
+            Command(
+                label = "Sync heart-rate history",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = historyHeartRateCommand(sevenDaysAgo),
+                writeWithoutResponse = false,
+                settleDelayMs = 1_000L,
+            ),
+            Command(
+                label = "Sync SpO₂ history",
+                characteristicUuid = CHAR_34F1_UUID,
+                payload = hex("34 FA"),
+                writeWithoutResponse = true,
+                settleDelayMs = 1_000L,
+            ),
+            Command(
+                label = "Sync step history",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("B2 FA"),
+                writeWithoutResponse = false,
+                settleDelayMs = 1_000L,
+            ),
+        )
     }
 
     fun decode(
@@ -47,15 +130,18 @@ class FastrackProtocol : WatchProtocol {
         packet: ByteArray,
     ): String? {
         val uuid = characteristicUuid.lowercase(Locale.ROOT)
-        if (uuid != CHAR_33F2_UUID || packet.size < 4) {
+        if (uuid != CHAR_33F2_UUID || packet.isEmpty()) {
             return null
         }
 
         val b0 = packet[0].toInt() and 0xFF
-        val b1 = packet[1].toInt() and 0xFF
-        val b2 = packet[2].toInt() and 0xFF
 
-        if (b0 == 0xE5 && b1 == 0x11 && b2 == 0x00) {
+        if (
+            packet.size >= 4 &&
+            b0 == 0xE5 &&
+            packet[1].toInt() and 0xFF == 0x11 &&
+            packet[2].toInt() and 0xFF == 0x00
+        ) {
             val bpm = packet[3].toInt() and 0xFF
             if (bpm in 30..220) {
                 return "Heart rate $bpm bpm"
@@ -63,9 +149,35 @@ class FastrackProtocol : WatchProtocol {
             return "Heart-rate frame • raw value $bpm • no valid live BPM"
         }
 
-        if (uuid == CHAR_33F2_UUID && packet.firstOrNull()?.toInt()?.and(0xFF) == 0x44) {
+        if (b0 == 0x44) {
             return "FT_38093 vendor frame • " +
                 packet.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+        }
+
+        if (packet.size == 14 && b0 == 0xEB && packet[1].toInt() and 0xFF == 0x01) {
+            val year = ((packet[2].toInt() and 0xFF) shl 8) or (packet[3].toInt() and 0xFF)
+            val month = packet[4].toInt() and 0xFF
+            val day = packet[5].toInt() and 0xFF
+            val hour = packet[6].toInt() and 0xFF
+            val minute = packet[7].toInt() and 0xFF
+            if (
+                year in 2020..2100 &&
+                month in 1..12 &&
+                day in 1..31 &&
+                hour in 0..23 &&
+                minute in 0..59
+            ) {
+                return "FT_38093 dated vendor record • %04d-%02d-%02d %02d:%02d • fields=%s"
+                    .format(
+                        Locale.US,
+                        year,
+                        month,
+                        day,
+                        hour,
+                        minute,
+                        packet.drop(8).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) },
+                    )
+            }
         }
 
         return null
@@ -76,9 +188,39 @@ class FastrackProtocol : WatchProtocol {
             "%02X".format(it.toInt() and 0xFF)
         }
 
+    private fun syncTimeCommand(calendar: Calendar): ByteArray {
+        return byteArrayOf(
+            0xA3.toByte(),
+            ((calendar.get(Calendar.YEAR) shr 8) and 0xFF).toByte(),
+            (calendar.get(Calendar.YEAR) and 0xFF).toByte(),
+            (calendar.get(Calendar.MONTH) + 1).toByte(),
+            calendar.get(Calendar.DAY_OF_MONTH).toByte(),
+            calendar.get(Calendar.HOUR_OF_DAY).toByte(),
+            calendar.get(Calendar.MINUTE).toByte(),
+            calendar.get(Calendar.SECOND).toByte(),
+        )
+    }
+
+    private fun historyHeartRateCommand(calendar: Calendar): ByteArray {
+        return byteArrayOf(
+            0xF7.toByte(),
+            0xFA.toByte(),
+            ((calendar.get(Calendar.YEAR) shr 8) and 0xFF).toByte(),
+            (calendar.get(Calendar.YEAR) and 0xFF).toByte(),
+            (calendar.get(Calendar.MONTH) + 1).toByte(),
+            calendar.get(Calendar.DAY_OF_MONTH).toByte(),
+            calendar.get(Calendar.HOUR_OF_DAY).toByte(),
+            calendar.get(Calendar.MINUTE).toByte(),
+        )
+    }
+
+    private fun hex(text: String): ByteArray =
+        text.trim().split(Regex("\\s+")).map { it.toInt(16).toByte() }.toByteArray()
+
     private companion object {
         const val SERVICE_55FF_UUID = "000055ff-0000-1000-8000-00805f9b34fb"
         const val CHAR_33F1_UUID = "000033f1-0000-1000-8000-00805f9b34fb"
         const val CHAR_33F2_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
+        const val CHAR_34F1_UUID = "000034f1-0000-1000-8000-00805f9b34fb"
     }
 }
