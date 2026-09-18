@@ -780,7 +780,7 @@ class BleGattClient(private val context: Context) {
             decoded = decoded,
         )
 
-        _values.value = (_values.value + item).takeLast(MAX_CAPTURED_VALUES)
+        _values.value = (_values.value + item).takeLast(5_000)
 
         appendLog(
             source + " " + characteristic.uuid +
@@ -1032,7 +1032,7 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun appendLog(line: String) {
-        _logs.value = (_logs.value + line).takeLast(MAX_CAPTURED_LOGS)
+        _logs.value = (_logs.value + line).takeLast(5_000)
     }
 
     private companion object {
