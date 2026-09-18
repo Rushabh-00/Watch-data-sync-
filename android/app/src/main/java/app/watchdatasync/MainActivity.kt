@@ -124,7 +124,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
     val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
     val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
-    val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val todayStepTotal by viewModel.todayStepTotal.collectAsStateWithLifecycle()
     val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val batteryPercent by viewModel.batteryPercent.collectAsStateWithLifecycle()
     val lastSyncAt by viewModel.lastSyncAt.collectAsStateWithLifecycle()
@@ -163,18 +163,10 @@ private fun HomeScreen(viewModel: MainViewModel) {
     // The standard Battery Service value is not authoritative for this watch.
     // Keep it hidden until we observe and verify the FT_38093 battery packet.
     val battery = batteryPercent?.let { "$it%" } ?: "—"
-    val steps = dailyActivity?.steps?.toString() ?: "—"
-    val calories = dailyActivity?.calories
-        ?.takeIf { it > 0 }
-        ?.toString() ?: "—"
-    val distance = dailyActivity?.distanceMeters
-        ?.takeIf { it > 0 }
-        ?.let { formatDistanceMeters(it) }
-        ?: "—"
-    val activeMinutes = dailyActivity?.activeMinutes
-        ?.takeIf { it > 0 }
-        ?.let { "$it min" }
-        ?: "—"
+    val steps = todayStepTotal?.toString() ?: "—"
+    val calories = "—"
+    val distance = "—"
+    val activeMinutes = "—"
     val lastSyncLabel = lastSyncAt?.let {
         SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(it))
     } ?: "Never"
@@ -276,7 +268,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Steps",
                         value = steps,
-                        helper = "Watch reported",
+                        helper = if (todayStepTotal != null) "B2 history" else "Awaiting B2 history",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -294,7 +286,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Calories",
                         value = calories,
-                        helper = "Synced today",
+                        helper = "Waiting for verified packet",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -312,13 +304,13 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Distance",
                         value = distance,
-                        helper = "Watch reported",
+                        helper = "No verified distance packet",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
                         title = "Active time",
                         value = activeMinutes,
-                        helper = "Watch reported",
+                        helper = "No verified active-time packet",
                     )
                 }
             }
@@ -331,7 +323,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Sync status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (syncing) "Syncing heart-rate history and available health data…"
+                        if (syncing) "Syncing heart-rate history, B2 steps and available health data…"
                         else "Last sync: $lastSyncLabel",
                         style = MaterialTheme.typography.bodyMedium,
                     )
