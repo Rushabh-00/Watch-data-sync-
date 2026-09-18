@@ -1,115 +1,135 @@
-name: Android build
+name: Android Release
 
 on:
   push:
-    branches: ["main"]
-    paths:
-      - "android/**"
-      - ".github/workflows/android.yml"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: android-build-${{ github.ref }}
+  group: android-release-main
   cancel-in-progress: true
 
 env:
-  GRADLE_VERSION: "9.6.0"
+  GRADLE_VERSION: '9.6.0'
 
 jobs:
-  build:
-    name: Debug APK
+  release:
+    name: Release APK
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-36 build-tools;36.0.0 platform-tools"
-
-      - name: Install Android 37 SDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-37" "build-tools;37.0.0" || \
-            sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0"
-          sdkmanager --list_installed | sed -n '1,160p'
-          echo "ANDROID_HOME=${ANDROID_HOME}"
+          packages: 'platforms;android-37 build-tools;37.0.0 platform-tools'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
           cache-read-only: false
           cache-cleanup: on-success
           add-job-summary: on-failure
 
-      - name: Build debug APK
-        id: build
-        continue-on-error: true
+      - name: Read app version
+        id: version
         working-directory: android
+        shell: bash
         run: |
-          set +e
-          gradle assembleDebug --no-daemon --stacktrace --console=plain 2>&1 | tee ../build.log
-          status=${PIPESTATUS[0]}
-          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
-          exit "${status}"
+          set -euo pipefail
+          version="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Watch Data Sync version: $version"
 
-      - name: Report build failure
-        if: steps.build.outcome == 'failure'
+      - name: Run JVM tests
+        working-directory: android
+        run: gradle test --configuration-cache --build-cache --parallel
+
+      - name: Build release APK
+        working-directory: android
+        run: gradle assembleRelease --configuration-cache --build-cache --parallel
+
+      - name: Sign release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!name}" || { echo "Missing repository secret: $name"; exit 1; }
+          done
+
+          mkdir -p dist
+          keystore="$RUNNER_TEMP/watch-data-sync-release.jks"
+          unsigned="app/build/outputs/apk/release/app-release-unsigned.apk"
+          aligned="$RUNNER_TEMP/WatchDataSync-aligned.apk"
+          output="dist/WatchDataSync-release.apk"
+
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          test -s "$unsigned"
+
+          zipalign_bin=$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -1)
+          apksigner_bin=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          keytool_bin="$JAVA_HOME/bin/keytool"
+
+          test -x "$zipalign_bin"
+          test -x "$apksigner_bin"
+          test -x "$keytool_bin"
+
+          "$keytool_bin" -list             -storetype JKS             -keystore "$keystore"             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+          "$zipalign_bin" -P 16 -f 4 "$unsigned" "$aligned"
+          "$apksigner_bin" sign             --ks "$keystore"             --ks-type JKS             --ks-pass env:ANDROID_KEYSTORE_PASSWORD             --ks-key-alias "$ANDROID_KEY_ALIAS"             --key-pass env:ANDROID_KEY_PASSWORD             --out "$output"             "$aligned"
+
+          "$apksigner_bin" verify --verbose "$output"
+
+          test -s "$output"
+          rm -f "$keystore" "$aligned"
+
+      - name: Create or update version release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          log = Path("build.log").read_text(errors="replace")
-          lines = log.splitlines()
-          errors = [
-              line for line in lines
-              if "e: " in line.lower() or "error:" in line.lower() or "exception:" in line.lower()
-          ]
-          snippet = "\n".join((errors[-120:] + ["", "---- tail ----"] + lines[-80:]))
-          body = "### Android build failure\n\nCommit: " + "${{ github.sha }}" + "\n\n```text\n" + snippet + "\n```"
-          Path("comment.json").write_text(json.dumps({"body": body}))
-          PY
-          gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" --input comment.json
-
-      - name: Publish direct APK
-        if: steps.build.outcome == 'success'
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         working-directory: android
-        env:
-          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          NAME="WatchDataSync-debug.apk"
-          test -f "$APK"
-          cp "$APK" "$NAME"
+          set -euo pipefail
 
-          TAG="v0.2.0-build-${{ github.run_number }}"
-          gh release create "$TAG" "$NAME" \
-            --title "Watch Data Sync - Build ${{ github.run_number }}" \
-            --notes "Debug APK built from commit ${{ github.sha }}." \
-            --target "${{ github.sha }}"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/WatchDataSync-release.apk               --repo "$GITHUB_REPOSITORY"               --clobber
 
-          
+            gh release edit "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --title "Watch Data Sync v$APP_VERSION"
+          else
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+            git push origin "$RELEASE_TAG"
+
+            gh release create "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --title "Watch Data Sync v$APP_VERSION"               --generate-notes               dist/WatchDataSync-release.apk
+          fi
+
           echo "## Direct APK" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download WatchDataSync-debug.apk](https://github.com/${{ github.repository }}/releases/latest/download/${NAME})" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Fail workflow after build failure
-        if: steps.build.outcome == 'failure'
-        run: exit 1
+          echo "[Download WatchDataSync-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-release.apk)" >> "$GITHUB_STEP_SUMMARY"
