@@ -49,13 +49,15 @@ class BleScanner(context: Context) {
         address: String,
         preferredAddress: String?,
     ): Boolean {
-        if (preferredAddress != null && address.equals(preferredAddress, ignoreCase = true)) {
-            return true
+        // Once a watch is bound, never surface another BLE peripheral.
+        if (preferredAddress != null) {
+            return address.equals(preferredAddress, ignoreCase = true)
         }
 
-        val normalized = name.lowercase()
-        return normalized.contains("ft_38093") ||
-            normalized.contains("fastrack") 
+        // Before binding, discover only the known FT_38093 watch family.
+        // Do not show phones, earbuds, trackers, or unrelated Fastrack devices.
+        val normalized = name.trim().lowercase()
+        return normalized.startsWith("ft_38093")
     }
 
     private val callback = object : ScanCallback() {
