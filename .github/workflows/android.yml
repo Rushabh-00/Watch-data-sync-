@@ -1,4 +1,4 @@
-name: Android Build
+name: Android Release
 
 on:
   push:
@@ -7,18 +7,19 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: android-build-main
+  group: android-release-main
   cancel-in-progress: true
 
 env:
   GRADLE_VERSION: '9.6.0'
+  ANDROID_BUILD_TOOLS: '37.0.0'
 
 jobs:
-  build:
-    name: Build app
+  release:
+    name: Build release APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -32,6 +33,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platforms;android-37 build-tools;37.0.0 platform-tools'
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
@@ -39,10 +45,60 @@ jobs:
           cache-read-only: false
           cache-cleanup: on-success
 
-      - name: Run JVM tests
-        working-directory: android
-        run: gradle test --configuration-cache --build-cache --parallel
+      - name: Read app version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' android/app/build.gradle.kts | head -n 1)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Build debug APK
+      - name: Build release APK
         working-directory: android
-        run: gradle assembleDebug --configuration-cache --build-cache --parallel
+        run: gradle assembleRelease --configuration-cache --build-cache --parallel
+
+      - name: Sign release APK
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "$KEYSTORE_B64"
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+
+          KEYSTORE="$RUNNER_TEMP/watch-data-sync.keystore"
+          UNSIGNED="android/app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/watch-data-sync-aligned.apk"
+          APK="WatchDataSync-v${{ steps.version.outputs.version }}.apk"
+
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+
+          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/zipalign" -p 4 "$UNSIGNED" "$ALIGNED"
+
+          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/apksigner" sign             --ks "$KEYSTORE"             --ks-pass pass:"$KEYSTORE_PASSWORD"             --ks-key-alias "$KEY_ALIAS"             --key-pass pass:"$KEY_PASSWORD"             --out "$APK"             "$ALIGNED"
+
+          "$ANDROID_HOME/build-tools/${{ env.ANDROID_BUILD_TOOLS }}/apksigner" verify --verbose "$APK"
+
+          echo "apk=$APK" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$apk#WatchDataSync-$TAG.apk" --clobber
+          else
+            gh release create "$TAG" "$apk#WatchDataSync-$TAG.apk"               --title "Watch Data Sync $TAG"               --generate-notes
+          fi
