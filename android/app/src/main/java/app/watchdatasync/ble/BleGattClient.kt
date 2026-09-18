@@ -773,7 +773,6 @@ class BleGattClient(private val context: Context) {
 
         val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
         if (uuid == BATTERY_LEVEL_UUID) {
-            appendLog("BATTERY standard packet omitted from protocol capture value=" + hex(value))
             return
         }
 
