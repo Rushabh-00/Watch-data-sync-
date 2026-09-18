@@ -111,6 +111,7 @@ class BleGattClient(private val context: Context) {
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
     private var syncFinishRunnable: Runnable? = null
     private var syncRequested = false
+    private var sleepSessionDate: Calendar? = null
 
     init {
         _values.value = loadPersistedCapture()
@@ -1008,6 +1009,7 @@ class BleGattClient(private val context: Context) {
                 }
             }
             0xB2 -> decodeStepsHistory(value)
+            0x31 -> rememberSleepSession(value)
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
             0x32 -> decodeSleepStage(value)
@@ -1095,61 +1097,121 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun decodeSpo2History(value: ByteArray) {
-        if (value.size < 8) return
-        val hasFa = (value[1].toInt() and 0xFF) == 0xFA
-        val yearIndex = if (hasFa) 2 else 1
-        if (yearIndex + 4 >= value.size) return
-        val year = ((value[yearIndex].toInt() and 0xFF) shl 8) or (value[yearIndex + 1].toInt() and 0xFF)
-        val month = value[yearIndex + 2].toInt() and 0xFF
-        val day = value[yearIndex + 3].toInt() and 0xFF
-        val hour = value[yearIndex + 4].toInt() and 0xFF
-        val percent = value.last().toInt() and 0xFF
-        if (year !in 2020..2100 || month !in 1..12 || day !in 1..31 || hour !in 0..23 || percent !in 70..100) return
+        // Verified data-channel layout:
+        // 34 FA yyyy MM dd HH mm <12 x SpO2>, followed by 34 FA FD xx.
+        if (value.size != 20 || (value[1].toInt() and 0xFF) != 0xFA) return
 
-        val calendar = Calendar.getInstance().apply {
+        val year = ((value[2].toInt() and 0xFF) shl 8) or (value[3].toInt() and 0xFF)
+        val month = value[4].toInt() and 0xFF
+        val day = value[5].toInt() and 0xFF
+        val hour = value[6].toInt() and 0xFF
+        val minute = value[7].toInt() and 0xFF
+        if (
+            year !in 2020..2100 ||
+            month !in 1..12 ||
+            day !in 1..31 ||
+            hour !in 0..23 ||
+            minute !in 0..59
+        ) return
+
+        val end = Calendar.getInstance().apply {
             clear()
-            set(year, month - 1, day, hour, 0, 0)
+            set(year, month - 1, day, hour, minute, 0)
         }
-        val sample = Spo2HistorySample(calendar.timeInMillis, percent)
-        _spo2History.value = mergeSpo2History(_spo2History.value, listOf(sample))
-        persistSpo2History()
-        appendLog(
-            "SYNC_DATA SpO2=" + percent + "% at " +
-                year + "-" + month.toString().padStart(2, '0') + "-" +
-                day.toString().padStart(2, '0') + " " +
-                hour.toString().padStart(2, '0') + ":00",
-        )
+
+        val samples = buildList {
+            for (index in 0 until 12) {
+                val percent = value[8 + index].toInt() and 0xFF
+                if (percent in 70..100) {
+                    add(
+                        Spo2HistorySample(
+                            epochMillis = end.timeInMillis -
+                                (11L - index) * 10L * 60L * 1000L,
+                            percent = percent,
+                        ),
+                    )
+                }
+            }
+        }
+
+        if (samples.isNotEmpty()) {
+            _spo2History.value = mergeSpo2History(_spo2History.value, samples)
+            persistSpo2History()
+            appendLog(
+                "SYNC_DATA SpO2 history=" + samples.size +
+                    " samples ending " +
+                    year + "-" + month.toString().padStart(2, '0') + "-" +
+                    day.toString().padStart(2, '0') + " " +
+                    hour.toString().padStart(2, '0') + ":" +
+                    minute.toString().padStart(2, '0'),
+            )
+        }
+    }
+
+    private fun rememberSleepSession(value: ByteArray) {
+        // 31 01 yyyy MM dd <record-count>
+        if (value.size < 6 || (value[1].toInt() and 0xFF) != 0x01) return
+        val year = ((value[2].toInt() and 0xFF) shl 8) or (value[3].toInt() and 0xFF)
+        val month = value[4].toInt() and 0xFF
+        val day = value[5].toInt() and 0xFF
+        if (year !in 2020..2100 || month !in 1..12 || day !in 1..31) return
+
+        sleepSessionDate = Calendar.getInstance().apply {
+            clear()
+            set(year, month - 1, day, 0, 0, 0)
+        }
+        appendLog("SYNC_DATA sleep session " + year + "-" +
+            month.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0'))
     }
 
     private fun decodeSleepStage(value: ByteArray) {
-        if (value.size < 5) return
-        val hour = value[1].toInt() and 0xFF
-        val minute = value[2].toInt() and 0xFF
-        val stage = value[3].toInt() and 0xFF
-        val duration = leU16(value, 4)
-        if (hour !in 0..23 || minute !in 0..59 || stage !in 1..4 || duration <= 0) return
+        // 32 <HH mm stage 01 dur16> repeated on 34F2.
+        if (value.size < 7 || ((value.size - 1) % 6 != 0)) return
+        val session = sleepSessionDate ?: return
+        val sessionDay = session.get(Calendar.DAY_OF_MONTH)
+        val sessionMonth = session.get(Calendar.MONTH)
+        val sessionYear = session.get(Calendar.YEAR)
 
-        val calendar = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
+        val samples = buildList {
+            for (offset in 1 until value.size step 6) {
+                val hour = value[offset].toInt() and 0xFF
+                val minute = value[offset + 1].toInt() and 0xFF
+                val stage = value[offset + 2].toInt() and 0xFF
+                val marker = value[offset + 3].toInt() and 0xFF
+                val duration = beU16(value, offset + 4)
+                if (
+                    hour !in 0..23 ||
+                    minute !in 0..59 ||
+                    stage !in 1..4 ||
+                    marker != 0x01 ||
+                    duration <= 0
+                ) continue
+
+                // Sleep segments after noon belong to the previous calendar day.
+                val dayOffset = if (hour >= 12) -1 else 0
+                val calendar = Calendar.getInstance().apply {
+                    clear()
+                    set(sessionYear, sessionMonth, sessionDay, hour, minute, 0)
+                    add(Calendar.DAY_OF_YEAR, dayOffset)
+                }
+                add(
+                    SleepStageSample(
+                        epochMillis = calendar.timeInMillis,
+                        stage = stage,
+                        durationMinutes = duration,
+                    ),
+                )
+            }
         }
-        val sample = SleepStageSample(
-            epochMillis = calendar.timeInMillis,
-            stage = stage,
-            durationMinutes = duration,
-        )
-        _sleepHistory.value = (_sleepHistory.value + sample)
-            .distinctBy { it.epochMillis to it.stage }
-            .sortedBy { it.epochMillis }
-            .takeLast(MAX_SLEEP_HISTORY)
-        persistSleepHistory()
-        appendLog(
-            "SYNC_DATA sleep stage=" + stage +
-                " start=" + String.format(Locale.US, "%02d:%02d", hour, minute) +
-                " duration=" + duration + " min",
-        )
+
+        if (samples.isNotEmpty()) {
+            _sleepHistory.value = (_sleepHistory.value + samples)
+                .distinctBy { it.epochMillis to it.stage }
+                .sortedBy { it.epochMillis }
+                .takeLast(MAX_SLEEP_HISTORY)
+            persistSleepHistory()
+            appendLog("SYNC_DATA sleep stages=" + samples.size)
+        }
     }
 
     private fun persistSleepHistory() {
