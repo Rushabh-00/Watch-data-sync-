@@ -206,3 +206,17 @@ Current goal for the next continuation:
 - Both flavors are compiled and tested by CI; only the sideload-safe flavor is signed/uploaded as the public GitHub release APK.
 - BLE/GATT sync functionality and the verified FT_38093 protocol paths are unchanged by this distribution split.
 - Added a proper launcher icon and explicit distribution metadata.
+
+
+## Professional product hardening and protocol trust pass — 2026-09-19
+
+- Re-checked the project Rules, Architecture, Design, PRD, Phases and latest capture evidence before changing protocol/UI/distribution behavior.
+- The FT_38093 complete-sync capture remains the basis for the vendor-history structures: EC 01/EC 02 and 44 FA pages/completion markers. Their measurement meanings remain intentionally unassigned.
+- The BLE transport was hardened so the app no longer enables every notify/indicate characteristic. It now enables only observed vendor notification endpoints plus observed standard oximeter endpoints, reducing unrelated CCCD traffic and notification setup timeouts.
+- Automatic sync now waits for the GATT operation queue to settle instead of starting on a fixed delay while notification setup is still running.
+- Candidate B1/B2 and 26 01 activity values are no longer promoted into user-visible authoritative Today totals. Their raw evidence remains available in Diagnostics.
+- Home was redesigned into a professional FT_38093 dashboard with explicit connection, sync, battery, verified wellness metrics, protocol-health and evidence-state sections.
+- Added professional product docs: Feature Matrix, Research, updated Architecture, Design, PRD, Phases, Rules and README.
+- Official Fastrack Smart World public feature surface was re-checked: connection, firmware/settings, HR/SpO2/BP, notifications, fitness/multisport/sleep, contacts, Google Fit, calls/SMS and weather. Public sibling-app research remains context only.
+- Play Protect distribution remains split into sideload-safe and Play flavors; notification-listener access stays out of the sideload APK.
+- Release target after CI verification: v0.5.0.
