@@ -144,10 +144,10 @@ class BleGattClient(private val context: Context) {
         _heartRateHistory.value = loadHeartRateHistory()
         _spo2History.value = loadSpo2History()
         _dailyActivity.value = loadDailyActivity()
-        _stepHistory.value = loadStepHistory()
-        _todayStepTotal.value = todaySteps(_stepHistory.value)
+        _stepHistory.value = emptyList()
+        _todayStepTotal.value = null
         _activityProbeStatus.value =
-            "Daily steps use verified B1/B2 records; 26 01 is watch-face configuration on the observed FT_38093 firmware"
+            "Step/calorie/distance semantics are gated: FT_38093 B1/B2 structure is observed, but current captures do not prove that it is authoritative Today data"
         _sleepHistory.value = loadSleepHistory()
         _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
         _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
@@ -1342,39 +1342,28 @@ class BleGattClient(private val context: Context) {
             epochMillis = calendar.timeInMillis,
             totalSteps = totalSteps,
         )
-        _stepHistory.value = mergeStepHistory(_stepHistory.value, listOf(sample))
-        _todayStepTotal.value = todaySteps(_stepHistory.value)
-        persistStepHistory()
-
+        // Keep this candidate in the raw capture only. Current FT_38093 captures do not
+        // prove that B1/B2 totalSteps is the authoritative Today value shown on the watch.
         appendLog(
-            "SYNC_DATA " + label + " date=" + year + "-" + month + "-" + day +
-                " hour=" + hour + " steps=" + totalSteps +
+            "SYNC_DATA " + label + " CANDIDATE date=" + year + "-" + month + "-" + day +
+                " hour=" + hour + " totalSteps=" + totalSteps +
                 " raw=" + hex(value),
         )
     }
 
     private fun decodeDailyActivity(value: ByteArray) {
         val activity = fastrackProtocol.decodeDailyActivity(value) ?: run {
-            appendLog("SYNC_DATA activity unverified raw=" + hex(value))
+            appendLog("SYNC_DATA activity candidate rejected raw=" + hex(value))
             return
         }
 
+        // The 13-byte shape is a protocol-family candidate, not a verified FT_38093
+        // Today response. Never promote it into user-visible health totals.
         activityProbeResponseReceived = true
         _activityProbeStatus.value =
-            "Verified 26 01 activity response • " + activity.steps + " steps • " + activity.calories + " kcal"
-
-        val summary = DailyActivitySummary(
-            epochMillis = System.currentTimeMillis(),
-            steps = activity.steps,
-            calories = activity.calories,
-            distanceMeters = activity.distanceMeters,
-            activeMinutes = activity.activeMinutes,
-        )
-
-        _dailyActivity.value = summary
-        persistDailyActivity(summary)
+            "Activity candidate observed; FT_38093 Today semantics remain unverified"
         appendLog(
-            "SYNC_DATA activity=" + activity.steps + " steps, " +
+            "SYNC_DATA activity CANDIDATE steps=" + activity.steps + ", " +
                 activity.calories + " kcal, " +
                 activity.distanceMeters + " m, " +
                 activity.activeMinutes + " min" +
@@ -1974,7 +1963,7 @@ class BleGattClient(private val context: Context) {
         const val KEY_DISTANCE = "daily_distance"
         const val KEY_ACTIVE_MINUTES = "daily_active_minutes"
         const val KEY_ACTIVITY_DECODER_VERSION = "daily_activity_decoder_version"
-        const val ACTIVITY_DECODER_VERSION = 3
+        const val ACTIVITY_DECODER_VERSION = 4
         const val KEY_BATTERY = "watch_battery"
         const val KEY_LAST_SYNC = "last_sync_at"
         const val HEART_RATE_RETENTION_MS = 30L * 24L * 60L * 60L * 1000L
