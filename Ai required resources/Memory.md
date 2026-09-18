@@ -71,5 +71,6 @@ The app now has an automatic FT_38093 sync path on the direct BLE/GATT connectio
 - today's activity summary, watch battery response, heart-rate history, SpO₂ history and step-history requests are persisted for the product UI
 - History now shows synced heart-rate and SpO₂ records instead of only raw discovery captures
 - the normal Home flow auto-discovers the FT_38093 watch and syncs automatically after connection
-- the 14-byte EB 01 ... vendor records observed on 33F2 are retained as protocol evidence but their later fields are still not assigned to sleep/stress semantics without direct evidence
-- sleep/workout/stress semantic decoding remains disabled until a verified request/response mapping is observed for FT_38093
+- the 14-byte EB 01 ... vendor records observed on 33F2 are retained as protocol evidence but their later fields are still not assigned to steps/stress/workout semantics without direct evidence
+- the verified protocol-family 0x32 sleep-stage response is now decoded and shown in History
+- workout/stress semantic decoding remains disabled until a verified request/response mapping is observed for FT_38093
