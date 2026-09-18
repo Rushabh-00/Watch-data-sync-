@@ -111,7 +111,18 @@ class BleGattClient(private val context: Context) {
                     reportError("Bluetooth permission was denied")
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED && status != BluetoothGatt.GATT_SUCCESS) {
-                reportError("Bluetooth connection failed (status " + status + ")")
+                val reason = when (status) {
+                    GATT_CONN_TERMINATE_PEER_USER ->
+                        "The watch/peripheral terminated the BLE connection"
+                    GATT_CONN_TERMINATE_LOCAL_HOST ->
+                        "Android terminated the BLE connection"
+                    GATT_CONN_TIMEOUT ->
+                        "BLE connection timed out"
+                    else ->
+                        "BLE disconnected unexpectedly"
+                }
+
+                reportError(reason + " (status " + status + ")")
                 runCatching { gatt.close() }
                 if (this@BleGattClient.gatt == gatt) this@BleGattClient.gatt = null
             }
@@ -165,6 +176,18 @@ class BleGattClient(private val context: Context) {
         override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
             appendLog("MTU mtu=" + mtu + " status=" + status)
         }
+    }
+
+    private companion object {
+        // Android Bluetooth stack / HCI disconnect reason 0x13.
+        // This means the peer side terminated the connection.
+        const val GATT_CONN_TERMINATE_PEER_USER = 19
+
+        // Android Bluetooth stack / HCI disconnect reason for local host termination.
+        const val GATT_CONN_TERMINATE_LOCAL_HOST = 22
+
+        // HCI connection timeout.
+        const val GATT_CONN_TIMEOUT = 8
     }
 
     private fun propertyNames(properties: Int): List<String> = buildList {
