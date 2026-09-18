@@ -79,6 +79,7 @@ class BleGattClient(private val context: Context) {
             val responseQuietWindowMs: Long,
             val responsePrefixes: List<ByteArray>,
             val completeResponsePrefix: ByteArray?,
+            val retryCount: Int,
         ) : GattOperation
     }
 
@@ -367,6 +368,7 @@ class BleGattClient(private val context: Context) {
         responseQuietWindowMs: Long = 0L,
         responsePrefixes: List<ByteArray> = emptyList(),
         completeResponsePrefix: ByteArray? = null,
+        retryCount: Int = 0,
     ) {
         if (currentGatt !== gatt) return
         val key = "write:" + characteristic.uuid + ":" + hex(value)
@@ -384,6 +386,7 @@ class BleGattClient(private val context: Context) {
                 responseQuietWindowMs = responseQuietWindowMs,
                 responsePrefixes = responsePrefixes,
                 completeResponsePrefix = completeResponsePrefix,
+                retryCount = retryCount,
             ),
         )
         startNextOperation()
@@ -445,6 +448,7 @@ class BleGattClient(private val context: Context) {
                 responseQuietWindowMs = command.responseQuietWindowMs,
                 responsePrefixes = command.responsePrefixes,
                 completeResponsePrefix = command.completeResponsePrefix,
+                retryCount = command.retryCount,
             )
         }
 
@@ -645,7 +649,7 @@ class BleGattClient(private val context: Context) {
         val timeout = Runnable {
             if (activeOperation !== operation) return@Runnable
             appendLog("SYNC_WAIT_TIMEOUT " + operation.label)
-            finishOperation(operationKey(operation))
+            finishOperation(operationKey(operation), timedOut = true)
         }
         operationTimeout = timeout
         handler.postDelayed(timeout, operation.responseTimeoutMs)
@@ -668,7 +672,10 @@ class BleGattClient(private val context: Context) {
         handler.postDelayed(runnable, operation.responseQuietWindowMs)
     }
 
-    private fun finishOperation(key: String) {
+    private fun finishOperation(
+        key: String,
+        timedOut: Boolean = false,
+    ) {
         val active = activeOperation ?: return
         if (operationKey(active) != key) {
             appendLog("GATT_LATE_CALLBACK ignored=" + key)
@@ -681,6 +688,21 @@ class BleGattClient(private val context: Context) {
         responseQuietRunnable = null
         activeOperation = null
         queuedOperationKeys.remove(key)
+
+        if (timedOut && active is GattOperation.Write && active.retryCount > 0) {
+            val retry = active.copy(retryCount = active.retryCount - 1)
+            appendLog(
+                "SYNC_RETRY " + active.label +
+                    " remaining=" + retry.retryCount,
+            )
+            operationQueue.addFirst(retry)
+            handler.postDelayed({
+                startNextOperation()
+                scheduleSyncCompletionIfIdle()
+            }, active.settleDelayMs)
+            return
+        }
+
         val delay = when (active) {
             is GattOperation.Write -> active.settleDelayMs
             else -> GATT_OPERATION_GAP_MS
@@ -884,6 +906,9 @@ class BleGattClient(private val context: Context) {
             reconnectAttempt = 0
             _error.value = null
 
+            if (matchedVendorProtocol) {
+                requestMtu(247)
+            }
             enqueueStandardCharacteristics(gatt)
             enqueueObservedNotifications(gatt)
 
@@ -1202,8 +1227,7 @@ class BleGattClient(private val context: Context) {
         val expectedNotifyUuids = when (
             active.characteristic.uuid.toString().lowercase(Locale.ROOT)
         ) {
-            CHAR_33F1_UUID -> setOf(CHAR_33F2_UUID)
-            CHAR_34F1_UUID -> setOf(CHAR_33F2_UUID, CHAR_34F2_UUID)
+            CHAR_33F1_UUID, CHAR_34F1_UUID -> OBSERVED_VENDOR_NOTIFY_CHANNELS
             else -> return
         }
         if (characteristicUuid !in expectedNotifyUuids) return
