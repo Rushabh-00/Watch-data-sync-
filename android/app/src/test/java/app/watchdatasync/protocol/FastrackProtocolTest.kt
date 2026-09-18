@@ -38,15 +38,18 @@ class FastrackProtocolTest {
         val spo2 = commands.first { it.label == "Sync SpO₂ history" }
 
         assertEquals(12_000L, steps.responseTimeoutMs)
-        assertEquals(3_000L, steps.responseQuietWindowMs)
+        assertEquals(0L, steps.responseQuietWindowMs)
         assertEquals("B2", steps.responsePrefixes.single().toHex())
+        assertEquals("B2 FD", steps.completeResponsePrefix!!.toHex())
 
         assertEquals(15_000L, sleep.responseTimeoutMs)
         assertEquals(0L, sleep.responseQuietWindowMs)
         assertEquals("31 02", sleep.completeResponsePrefix!!.toHex())
 
         assertEquals(15_000L, heartRate.responseTimeoutMs)
+        assertEquals(0L, heartRate.responseQuietWindowMs)
         assertEquals("F7", heartRate.responsePrefixes.single().toHex())
+        assertEquals("F7 FD", heartRate.completeResponsePrefix!!.toHex())
 
         assertEquals(12_000L, spo2.responseTimeoutMs)
         assertEquals("34 FA FD", spo2.completeResponsePrefix!!.toHex())
