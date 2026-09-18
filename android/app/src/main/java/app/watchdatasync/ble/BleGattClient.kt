@@ -769,6 +769,7 @@ class BleGattClient(private val context: Context) {
             } else {
                 null
             }
+            ?: diagnosticByteSummary(value)
 
         val item = GattValue(
             serviceUuid = serviceUuid,
@@ -789,18 +790,46 @@ class BleGattClient(private val context: Context) {
         )
     }
 
+    private fun diagnosticByteSummary(value: ByteArray): String {
+        if (value.isEmpty()) return "RAW bytes[0]"
+
+        val u8 = value.joinToString(", ") { (it.toInt() and 0xFF).toString() }
+        val u16Le = if (value.size >= 2) {
+            (0 until value.size - 1 step 2).joinToString(", ") { index ->
+                (value[index].toInt() and 0xFF) or
+                    ((value[index + 1].toInt() and 0xFF) shl 8)
+            }
+        } else {
+            "—"
+        }
+        val u16Be = if (value.size >= 2) {
+            (0 until value.size - 1 step 2).joinToString(", ") { index ->
+                ((value[index].toInt() and 0xFF) shl 8) or
+                    (value[index + 1].toInt() and 0xFF)
+            }
+        } else {
+            "—"
+        }
+
+        val u32Le = if (value.size >= 4) {
+            (0 until value.size - 3 step 4).joinToString(", ") { index ->
+                (value[index].toLong() and 0xFF) or
+                    ((value[index + 1].toLong() and 0xFF) shl 8) or
+                    ((value[index + 2].toLong() and 0xFF) shl 16) or
+                    ((value[index + 3].toLong() and 0xFF) shl 24)
+            }
+        } else {
+            "—"
+        }
+
+        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • U16LE=[${u16Le}] • U16BE=[${u16Be}] • U32LE=[${u32Le}] • ASCII=${ascii(value)}"
+    }
+
     private fun decodeStandardValue(
         uuid: UUID,
         value: ByteArray,
     ): String? {
         val id = uuid.toString().lowercase(Locale.ROOT)
-
-        if (id == BATTERY_LEVEL_UUID) {
-            val percent = value.firstOrNull()?.toInt()?.and(0xFF)
-            return percent?.takeIf { it in 0..100 }?.let {
-                "Battery " + it + "%"
-            }
-        }
 
         if (id == HEART_RATE_MEASUREMENT_UUID && value.isNotEmpty()) {
             val flags = value[0].toInt() and 0xFF
@@ -914,6 +943,11 @@ class BleGattClient(private val context: Context) {
 
     fun clearError() {
         _error.value = null
+    }
+
+    fun clearCapture() {
+        _values.value = emptyList()
+        _logs.value = emptyList()
     }
 
     private fun appendLog(line: String) {
