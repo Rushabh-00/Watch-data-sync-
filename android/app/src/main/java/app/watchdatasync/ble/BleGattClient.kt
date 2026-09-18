@@ -40,6 +40,11 @@ class BleGattClient(private val context: Context) {
     private val fastrackProtocol = FastrackProtocol()
 
     private val handler = Handler(Looper.getMainLooper())
+    private val characteristicServiceUuids = mutableMapOf<String, String>()
+    private val captureValues = ArrayList<GattValue>(MAX_CAPTURE_VALUES)
+    private val logValues = ArrayList<String>(MAX_LOG_VALUES)
+    private var captureUiRefreshRunnable: Runnable? = null
+    private var logUiRefreshRunnable: Runnable? = null
     private val capturePrefs = context.getSharedPreferences(
         CAPTURE_PREFS,
         Context.MODE_PRIVATE,
@@ -128,7 +133,11 @@ class BleGattClient(private val context: Context) {
     private var sleepSessionDate: Calendar? = null
 
     init {
-        _values.value = loadPersistedCapture()
+        val persistedCapture = loadPersistedCapture()
+        synchronized(captureValues) {
+            captureValues.addAll(persistedCapture)
+        }
+        _values.value = persistedCapture
         _heartRateHistory.value = loadHeartRateHistory()
         _spo2History.value = loadSpo2History()
         _dailyActivity.value = loadDailyActivity()
@@ -151,6 +160,7 @@ class BleGattClient(private val context: Context) {
         lastDevice = device
         _error.value = null
         _services.value = emptyList()
+        characteristicServiceUuids.clear()
         clearOperationQueue()
 
         openGatt(device, reconnect = false)
@@ -1067,11 +1077,12 @@ class BleGattClient(private val context: Context) {
 
         decodeFastrackSyncPacket(characteristic.uuid.toString(), value)
 
-        val serviceUuid = gatt.services.firstOrNull { service ->
-            service.characteristics.any { it.uuid == characteristic.uuid }
-        }?.uuid?.toString() ?: "unknown"
-
         val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
+        val serviceUuid = characteristicServiceUuids[uuid]
+            ?: gatt.services.firstOrNull { service ->
+                service.characteristics.any { it.uuid == characteristic.uuid }
+            }?.uuid?.toString()
+            ?: "unknown"
         if (uuid == BATTERY_LEVEL_UUID) {
             return
         }
@@ -1107,10 +1118,13 @@ class BleGattClient(private val context: Context) {
             decoded = decoded ?: diagnosticByteSummary(value),
         )
 
-        _values.value = (_values.value + item)
-            .filter { it.capturedAt >= System.currentTimeMillis() - CAPTURE_RETENTION_MS }
-            .takeLast(MAX_CAPTURE_VALUES)
-
+        synchronized(captureValues) {
+            captureValues.add(item)
+            if (captureValues.size > MAX_CAPTURE_VALUES) {
+                captureValues.subList(0, captureValues.size - MAX_CAPTURE_VALUES).clear()
+            }
+        }
+        scheduleCaptureUiRefresh()
         schedulePersistCapture()
         appendLog(
             source + " " + characteristic.uuid +
@@ -1660,6 +1674,17 @@ class BleGattClient(private val context: Context) {
             ?.getOrNull(1)
             ?.toIntOrNull()
 
+    private fun scheduleCaptureUiRefresh() {
+        if (captureUiRefreshRunnable != null) return
+        val runnable = Runnable {
+            captureUiRefreshRunnable = null
+            val snapshot = synchronized(captureValues) { captureValues.toList() }
+            _values.value = snapshot
+        }
+        captureUiRefreshRunnable = runnable
+        handler.postDelayed(runnable, CAPTURE_UI_REFRESH_MS)
+    }
+
     private fun schedulePersistCapture() {
         capturePersistRunnable?.let(handler::removeCallbacks)
         val runnable = Runnable { persistCapture() }
@@ -1670,9 +1695,13 @@ class BleGattClient(private val context: Context) {
     private fun persistCapture() {
         capturePersistRunnable = null
         val cutoff = System.currentTimeMillis() - CAPTURE_RETENTION_MS
-        val current = _values.value
-            .filter { it.capturedAt >= cutoff }
-            .takeLast(MAX_CAPTURE_VALUES)
+        val current = synchronized(captureValues) {
+            captureValues.removeAll { it.capturedAt < cutoff }
+            if (captureValues.size > MAX_CAPTURE_VALUES) {
+                captureValues.subList(0, captureValues.size - MAX_CAPTURE_VALUES).clear()
+            }
+            captureValues.toList()
+        }
 
         val array = JSONArray()
         current.forEach { value ->
@@ -1813,14 +1842,8 @@ class BleGattClient(private val context: Context) {
         return mantissa * Math.pow(10.0, exponent.toDouble())
     }
 
-    private fun isStandardTextCharacteristic(uuid: String): Boolean = uuid in setOf(
-        "00002a24-0000-1000-8000-00805f9b34fb",
-        "00002a25-0000-1000-8000-00805f9b34fb",
-        "00002a26-0000-1000-8000-00805f9b34fb",
-        "00002a27-0000-1000-8000-00805f9b34fb",
-        "00002a28-0000-1000-8000-00805f9b34fb",
-        "00002a29-0000-1000-8000-00805f9b34fb",
-    )
+    private fun isStandardTextCharacteristic(uuid: String): Boolean =
+        uuid in STANDARD_TEXT_CHARACTERISTIC_UUIDS
 
     private fun propertyNames(properties: Int): List<String> = buildList {
         if (properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) add("READ")
@@ -1855,6 +1878,17 @@ class BleGattClient(private val context: Context) {
     fun clearCapture() {
         capturePersistRunnable?.let(handler::removeCallbacks)
         capturePersistRunnable = null
+        captureUiRefreshRunnable?.let(handler::removeCallbacks)
+        captureUiRefreshRunnable = null
+        logUiRefreshRunnable?.let(handler::removeCallbacks)
+        logUiRefreshRunnable = null
+
+        synchronized(captureValues) {
+            captureValues.clear()
+        }
+        synchronized(logValues) {
+            logValues.clear()
+        }
         _values.value = emptyList()
         _logs.value = emptyList()
         capturePrefs.edit().remove(CAPTURE_KEY).apply()
@@ -1868,7 +1902,22 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun appendLog(line: String) {
-        _logs.value = (_logs.value + line).takeLast(5_000)
+        synchronized(logValues) {
+            logValues.add(line)
+            if (logValues.size > MAX_LOG_VALUES) {
+                logValues.subList(0, logValues.size - MAX_LOG_VALUES).clear()
+            }
+        }
+
+        if (logUiRefreshRunnable == null) {
+            val runnable = Runnable {
+                logUiRefreshRunnable = null
+                val snapshot = synchronized(logValues) { logValues.toList() }
+                _logs.value = snapshot
+            }
+            logUiRefreshRunnable = runnable
+            handler.postDelayed(runnable, LOG_UI_REFRESH_MS)
+        }
     }
 
     private companion object {
