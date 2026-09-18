@@ -1865,7 +1865,7 @@ class BleGattClient(private val context: Context) {
             .joinToString("")
 
     private fun timestamp(): String =
-        SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
+        SimpleDateFormat("h:mm:ss.SSS a", Locale.US).format(Date())
 
     fun reportError(message: String) {
         _error.value = message
