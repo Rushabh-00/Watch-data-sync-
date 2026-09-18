@@ -1013,7 +1013,7 @@ class BleGattClient(private val context: Context) {
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
             0x32 -> decodeSleepStage(value)
-            0xCB, 0xB1, 0xB2 -> appendLog("SYNC_DATA passive frame " + hex(value))
+            0xCB, 0xB1 -> appendLog("SYNC_DATA passive frame " + hex(value))
         }
     }
 
