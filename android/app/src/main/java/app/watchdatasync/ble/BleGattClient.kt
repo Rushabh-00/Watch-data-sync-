@@ -1007,30 +1007,63 @@ class BleGattClient(private val context: Context) {
                     appendLog("SYNC_DATA battery=" + battery + "%")
                 }
             }
-            0x26 -> {
-                if (value.size >= 10 && (value[1].toInt() and 0xFF) == 0x01) {
-                    val summary = DailyActivitySummary(
-                        epochMillis = System.currentTimeMillis(),
-                        steps = leU16(value, 3),
-                        calories = leU16(value, 5),
-                        distanceMeters = leU16(value, 7),
-                        activeMinutes = value[9].toInt() and 0xFF,
-                    )
-                    _dailyActivity.value = summary
-                    persistDailyActivity(summary)
-                    appendLog(
-                        "SYNC_DATA activity=" + summary.steps + " steps, " +
-                            summary.calories + " kcal, " +
-                            summary.distanceMeters + " m, " +
-                            summary.activeMinutes + " min",
-                    )
-                }
-            }
+            0xB2 -> decodeStepsHistory(value)
             0xF7 -> decodeHeartRateHistory(value)
             0x34 -> decodeSpo2History(value)
             0x32 -> decodeSleepStage(value)
             0xCB, 0xB1, 0xB2 -> appendLog("SYNC_DATA passive frame " + hex(value))
         }
+    }
+
+    private fun decodeStepsHistory(value: ByteArray) {
+        // Verified GloryFit-family layout:
+        // B2 yyyy MM dd HH total16 runStart runEnd reserved run16 walkStart walkEnd reserved walk16
+        if (value.size != 18) return
+
+        val year = ((value[1].toInt() and 0xFF) shl 8) or (value[2].toInt() and 0xFF)
+        val month = value[3].toInt() and 0xFF
+        val day = value[4].toInt() and 0xFF
+        val hour = value[5].toInt() and 0xFF
+        val totalSteps = beU16(value, 6)
+        if (
+            year !in 2020..2100 ||
+            month !in 1..12 ||
+            day !in 1..31 ||
+            hour !in 0..23 ||
+            totalSteps !in 0..100_000
+        ) return
+
+        val calendar = Calendar.getInstance().apply {
+            clear()
+            set(year, month - 1, day, hour, 0, 0)
+        }
+
+        // B2 is an hourly cumulative record. The latest record for today is the
+        // watch's current total; never treat the 16-bit run/walk fields as calories
+        // or distance.
+        val summary = DailyActivitySummary(
+            epochMillis = calendar.timeInMillis,
+            steps = totalSteps,
+            calories = 0,
+            distanceMeters = 0,
+            activeMinutes = 0,
+        )
+        val current = _dailyActivity.value
+        if (
+            current == null ||
+            calendar.timeInMillis >= current.epochMillis
+        ) {
+            _dailyActivity.value = summary
+            persistDailyActivity(summary)
+        }
+
+        appendLog(
+            "SYNC_DATA steps=" + totalSteps +
+                " at " + year + "-" +
+                month.toString().padStart(2, '0') + "-" +
+                day.toString().padStart(2, '0') + " " +
+                hour.toString().padStart(2, '0') + ":00",
+        )
     }
 
     private fun decodeHeartRateHistory(value: ByteArray) {
@@ -1146,6 +1179,10 @@ class BleGattClient(private val context: Context) {
             }
         }.sortedBy { it.epochMillis }.takeLast(MAX_SLEEP_HISTORY)
     }
+
+    private fun beU16(value: ByteArray, offset: Int): Int =
+        ((value[offset].toInt() and 0xFF) shl 8) or
+            (value[offset + 1].toInt() and 0xFF)
 
     private fun leU16(value: ByteArray, offset: Int): Int =
         (value[offset].toInt() and 0xFF) or ((value[offset + 1].toInt() and 0xFF) shl 8)
