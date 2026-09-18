@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.watchdatasync.FastrackFeatureHubScreen
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.WatchDevice
 import kotlinx.coroutines.delay
@@ -81,6 +82,7 @@ private enum class AppTab(val label: String, val iconText: String) {
     HOME("Home", "⌂"),
     HISTORY("History", "◷"),
     WATCH("Watch", "⌁"),
+    FEATURES("More", "✦"),
     DIAGNOSTICS("Diagnostics", "≡"),
 }
 
@@ -111,6 +113,7 @@ private fun WatchDataSyncApp(viewModel: MainViewModel) {
                 AppTab.HOME -> HomeScreen(viewModel)
                 AppTab.HISTORY -> HistoryScreen(viewModel)
                 AppTab.WATCH -> WatchScreen(viewModel)
+                AppTab.FEATURES -> FeatureHubScreen(viewModel)
                 AppTab.DIAGNOSTICS -> DiagnosticsScreen(viewModel)
             }
         }
