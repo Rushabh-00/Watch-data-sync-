@@ -127,36 +127,35 @@ object VendorHistoryProtocol {
     private fun decodeEcBatch(packet: ByteArray): EcBatch? {
         if (packet.size < 8 || (packet.size - 2) % 6 != 0) return null
 
-        val records = buildList {
-            for (offset in 2 until packet.size step 6) {
-                val hour = packet[offset].u8()
-                val minute = packet[offset + 1].u8()
-                val type = packet[offset + 2].u8()
-                val reservedHigh = packet[offset + 3].u8()
-                val reservedLow = packet[offset + 4].u8()
-                val value = packet[offset + 5].u8()
+        val records = mutableListOf<EcRecord>()
+        for (offset in 2 until packet.size step 6) {
+            val hour = packet[offset].u8()
+            val minute = packet[offset + 1].u8()
+            val type = packet[offset + 2].u8()
+            val reservedHigh = packet[offset + 3].u8()
+            val reservedLow = packet[offset + 4].u8()
+            val value = packet[offset + 5].u8()
 
-                if (hour !in 0..23 || minute !in 0..59) return null
+            if (hour !in 0..23 || minute !in 0..59) return null
 
-                add(
-                    EcRecord(
-                        hour = hour,
-                        minute = minute,
-                        type = type,
-                        reservedHigh = reservedHigh,
-                        reservedLow = reservedLow,
-                        value = value,
-                    ),
-                )
-            }
+            records += EcRecord(
+                hour = hour,
+                minute = minute,
+                type = type,
+                reservedHigh = reservedHigh,
+                reservedLow = reservedLow,
+                value = value,
+            )
         }
 
-        if (records.isEmpty()) return null
-
-        return EcBatch(
-            records = records,
-            raw = packet.copyOf(),
-        )
+        return if (records.isEmpty()) {
+            null
+        } else {
+            EcBatch(
+                records = records,
+                raw = packet.copyOf(),
+            )
+        }
     }
 
     private fun decodeFa(packet: ByteArray): Packet? {
