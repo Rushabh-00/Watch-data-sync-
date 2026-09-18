@@ -165,3 +165,11 @@ Current goal for the next continuation:
 - B2 FA is written successfully but this FT_38093 capture still returns no B2 packets before the previous 12 s timeout. The fetch window was increased to 30 s, matching the related protocol implementation's 30 s fetch timeout. No B2 field values are to be fabricated.
 - Related verified family protocol documents B1 realtime steps as the same 18-byte layout as B2; the app now decodes B1 with the same layout so a future passive B1 step packet can update today's total without another guessed opcode.
 - Calories and distance remain derived activity metrics rather than a verified FT_38093 history packet. Public GloryFit manuals state distance/calories are calculated from steps plus user height/weight, but the exact FT_38093 formula and the app's user-profile source are not yet established. Do not hardcode or invent values.
+
+
+## FT_38093 step-sync follow-up — 2026-09-18 / 2026-09-19 continuation
+
+- The user's latest hardware log still shows `SYNC_WAIT Sync step history timeout=12000ms`. Current `main` had already been changed to a 30 s B2 response window, so that capture was made with an older packaged APK rather than the latest `main` code.
+- The related public protocol implementation documents the normal connection preflight as READ `33F1` (feature bitmap) and READ `34F1` (data-channel metadata), followed by history commands. The app previously sent the observed 20-byte read-response values back as writes labelled "Channel 1 handshake" and "Channel 2 init"; this was removed.
+- `main` now performs those two GATT reads as a read-only preflight before the FT_38093 sync command sequence. It still sends the verified time, A1, A2, BB, AA, B2, sleep, F7 and SpO2 operations after the preflight.
+- v0.3.6 is the next hardware-validation build. The critical step evidence remains a real `B2 ...` packet / `B2 FD` completion or a passive `B1 ...` realtime-step packet. No step values, calories or distance are to be fabricated.
