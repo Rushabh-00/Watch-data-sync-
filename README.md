@@ -1,33 +1,42 @@
 # Watch Data Sync
 
-A model-first Android app for communicating with Fastrack/Titan smartwatches directly over Bluetooth Low Energy (BLE), without depending on the vendor companion app.
+A professional, model-first Android companion application for communicating with the exact observed Fastrack/Titan FT_38093 smartwatch directly over Bluetooth Low Energy (BLE).
 
-## Current milestone
+The app is designed to replace the vendor companion app for normal local watch-data access where the exact FT_38093 protocol is verified. It does not rely on Android OS pairing for its BLE workflow.
 
-The first milestone is **BLE/GATT discovery**, not yet full health-data synchronization.
+## Current release
 
-The app can:
-- scan for nearby BLE devices
-- connect to a selected device
-- discover GATT services and characteristics
-- expose characteristic properties
-- log GATT events and notification payloads as hexadecimal bytes
-- keep the vendor protocol isolated behind a protocol adapter layer
+- Version: 0.4.2
+- Direct FT_38093 BLE/GATT
+- Automatic reconnect
+- Verified HR / HR history / SpO2 history / battery / time sync
+- Evidence-aware sleep and vendor-history discovery
+- Professional dashboard + History + Watch + More + Diagnostics
+- Sideload-safe distribution flavor without notification-listener declaration
+- Play distribution flavor with notification relay support
 
-The exact health-data protocol is intentionally not hard-coded until it is identified for the target watch model.
+## Evidence status
 
-## Project layout
+The complete-sync capture proves repeatable FT_38093 vendor history structures including EC 01/EC 02 and 44 FA pages/completion markers. Their measurement semantics are intentionally not guessed.
 
-- `android/` — native Android application
-- `Ai required resources/` — project memory, architecture, rules, phases and design notes
-- `docs/PROTOCOL_DISCOVERY.md` — reverse-engineering workflow and evidence format
+The current FT_38093 captures do not prove that B1/B2 total steps or the 26 01 activity candidate is the authoritative Today activity source, so those values are not promoted into user totals.
+
+## Feature scope
+
+The public Fastrack Smart World surface includes watch management, health, fitness/multisport/sleep, notifications, contacts, Google Fit and weather. Our feature hub tracks these features individually and shows the evidence state for each.
 
 ## Build
 
-Open `android/` in Android Studio, using JDK 17 and the Gradle/Android plugin versions declared by the project.
+Open `android/` in Android Studio with JDK 17 and the declared Gradle/Android plugin versions.
 
-The app targets Android API 37 and uses Jetpack Compose.
+CI builds both distribution flavors and publishes the signed sideload-safe APK.
 
-## Important
+## Project resources
 
-Fastrack has multiple watch families and companion apps, and the public product catalog contains many different models. The BLE protocol must therefore be discovered per compatible model instead of assuming one UUID/packet format for the whole brand.
+- `Ai required resources/` — architecture, product design, feature matrix, research, rules, phases and memory
+- `docs/PROTOCOL_DISCOVERY.md` — evidence-first reverse-engineering workflow
+- `android/` — native Android application
+
+## Safety
+
+No guessed commands, no sensitive IDs in source/logs, no undocumented OTA/DFU, and no medical claims.
