@@ -48,6 +48,7 @@ class FastrackProtocol : WatchProtocol {
         val responseQuietWindowMs: Long = 0L,
         val responsePrefixes: List<ByteArray> = emptyList(),
         val completeResponsePrefix: ByteArray? = null,
+        val retryCount: Int = 0,
     )
 
     data class DailyActivityRecord(
@@ -124,10 +125,11 @@ class FastrackProtocol : WatchProtocol {
                 payload = hex("B2 FA"),
                 writeWithoutResponse = false,
                 settleDelayMs = 250L,
-                responseTimeoutMs = 30_000L,
+                responseTimeoutMs = 15_000L,
                 responseQuietWindowMs = 0L,
                 responsePrefixes = listOf(hex("B2")),
                 completeResponsePrefix = hex("B2 FD"),
+                retryCount = 1,
             ),
             Command(
                 label = "Sync sleep history",
