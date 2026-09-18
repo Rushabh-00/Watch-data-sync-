@@ -99,7 +99,7 @@ class FastrackProtocolTest {
             0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(),
             0x40, 0x01,
             0x7C.toByte(), 0x01,
-            0x00, 0x10, 0x00,
+            0x00, 0x00, 0x10,
         )
 
         val decoded = FastrackProtocol().decodeDailyActivity(packet)
