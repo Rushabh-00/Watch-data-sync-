@@ -135,7 +135,13 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
     }
 
-    val heartRate = if (connected) latestDecoded(values, UUID_HEART_RATE) ?: "—" else "—"
+    val heartRate = if (connected) {
+        latestDecoded(values, UUID_HEART_RATE)
+            ?: latestDecoded(values, UUID_VENDOR_HEART_RATE)
+            ?: "—"
+    } else {
+        "—"
+    }
     val spo2 = if (connected) latestDecoded(values, UUID_SPO2) ?: "—" else "—"
     val battery = if (connected) latestDecoded(values, UUID_BATTERY) ?: "—" else "—"
 
@@ -293,7 +299,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Data availability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Heart rate, SpO₂ and battery are shown only while the BLE watch connection is active.",
+                        "Heart rate, SpO₂ and battery are shown only while the BLE watch connection is active. FT_38093 heart-rate packets are decoded from the observed vendor BLE channel.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
@@ -382,8 +388,10 @@ private fun HistoryScreen(viewModel: MainViewModel) {
 
         val filtered = values.asReversed().filter {
             when (range) {
-                1 -> it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true)
-                2 -> !it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true)
+                1 -> it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true) ||
+                    it.characteristicUuid.equals(UUID_VENDOR_HEART_RATE, ignoreCase = true)
+                2 -> !it.characteristicUuid.equals(UUID_HEART_RATE, ignoreCase = true) &&
+                    !it.characteristicUuid.equals(UUID_VENDOR_HEART_RATE, ignoreCase = true)
                 else -> true
             }
         }
@@ -812,5 +820,6 @@ private fun normalizeMetricLabel(value: String): String =
         .trim()
 
 private const val UUID_HEART_RATE = "00002a37-0000-1000-8000-00805f9b34fb"
+private const val UUID_VENDOR_HEART_RATE = "000033f2-0000-1000-8000-00805f9b34fb"
 private const val UUID_BATTERY = "00002a19-0000-1000-8000-00805f9b34fb"
 private const val UUID_SPO2 = "00002a5f-0000-1000-8000-00805f9b34fb"
