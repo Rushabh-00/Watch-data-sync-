@@ -25,7 +25,7 @@ class BleScanner(context: Context) {
     val devices: StateFlow<List<WatchDevice>> = _devices.asStateFlow()
 
     @SuppressLint("MissingPermission")
-    fun start() {
+    fun start(preferredAddress: String? = null) {
         val bleScanner = scanner ?: return
         _devices.value = emptyList()
 
@@ -41,12 +41,30 @@ class BleScanner(context: Context) {
         scanner?.stopScan(callback)
     }
 
+    private fun isTargetWatch(
+        name: String,
+        address: String,
+        preferredAddress: String?,
+    ): Boolean {
+        if (preferredAddress != null && address.equals(preferredAddress, ignoreCase = true)) {
+            return true
+        }
+
+        val normalized = name.lowercase()
+        return normalized.contains("ft_38093") ||
+            normalized.contains("fastrack") 
+    }
+
     private val callback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             val name = result.scanRecord?.deviceName
                 ?: device.name?.takeIf { it.isNotBlank() }
                 ?: "Unnamed BLE device"
+
+            if (!isTargetWatch(name, device.address, preferredAddress)) {
+                return
+            }
 
             val next = WatchDevice(
                 name = name,
