@@ -296,15 +296,10 @@ class BleGattClient(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private fun enqueueStandardCharacteristics(currentGatt: BluetoothGatt) {
-        val known = setOf(
-            SPO2_CONTINUOUS_UUID,
-            SPO2_SPOT_CHECK_UUID,
-        )
-
         currentGatt.services.forEach { service ->
             service.characteristics.forEach { characteristic ->
                 val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
-                if (uuid in known) {
+                if (uuid in STANDARD_OXIMETER_UUIDS) {
                     enqueueReadIfSupported(currentGatt, characteristic)
                     enqueueNotificationIfSupported(currentGatt, characteristic)
                 }
@@ -1952,6 +1947,10 @@ class BleGattClient(private val context: Context) {
         const val MAX_LOG_VALUES = 5_000
         const val CAPTURE_UI_REFRESH_MS = 250L
         const val LOG_UI_REFRESH_MS = 100L
+        val STANDARD_OXIMETER_UUIDS = setOf(
+            SPO2_CONTINUOUS_UUID,
+            SPO2_SPOT_CHECK_UUID,
+        )
         val OBSERVED_VENDOR_NOTIFY_CHANNELS = setOf(
             CHAR_33F2_UUID,
             CHAR_34F2_UUID,
