@@ -57,7 +57,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.watchdatasync.model.GattValue
 import app.watchdatasync.model.WatchDevice
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -129,7 +131,21 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val batteryPercent by viewModel.batteryPercent.collectAsStateWithLifecycle()
     val lastSyncAt by viewModel.lastSyncAt.collectAsStateWithLifecycle()
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
+    val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val stepHistory by viewModel.stepHistory.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+
+    var clockNow by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            clockNow = System.currentTimeMillis()
+            delay(60_000L)
+        }
+    }
+
+    val todayActivity = dailyActivity?.takeIf { isSameLocalDay(it.epochMillis, clockNow) }
+    val dailySteps = buildDailyStepPoints(stepHistory, clockNow)
+    val dailySleep = buildDailySleepPoints(sleepHistory, clockNow)
 
     val permissions = rememberBluetoothPermissions()
     var hasPermissions by remember { mutableStateOf(false) }
@@ -163,13 +179,13 @@ private fun HomeScreen(viewModel: MainViewModel) {
     // The standard Battery Service value is not authoritative for this watch.
     // Keep it hidden until we observe and verify the FT_38093 battery packet.
     val battery = batteryPercent?.let { "$it%" } ?: "—"
-    val steps = todayStepTotal?.toString() ?: "—"
-    val calories = "—"
-    val distance = "—"
-    val activeMinutes = "—"
-    val lastSyncLabel = lastSyncAt?.let {
-        SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(it))
-    } ?: "Never"
+    val steps = todayStepTotal?.toString()
+        ?: todayActivity?.steps?.toString()
+        ?: "—"
+    val calories = todayActivity?.calories?.toString() ?: "—"
+    val distance = todayActivity?.distanceMeters?.let(::formatDistanceMeters) ?: "—"
+    val activeMinutes = todayActivity?.activeMinutes?.let { it.toString() + " min" } ?: "—"
+    val lastSyncLabel = lastSyncAt?.let(::formatDateTime12h) ?: "Never"
 
     LazyColumn(
         modifier = Modifier
@@ -180,16 +196,34 @@ private fun HomeScreen(viewModel: MainViewModel) {
         item { Spacer(Modifier.height(12.dp)) }
 
         item {
-            Text(
-                text = "Watch Data Sync",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Health and fitness dashboard",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                ),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Watch Data Sync", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(
+                            "FT_38093 • local BLE • automatic history sync",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(formatClockTime(clockNow), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(
+                            SimpleDateFormat("EEE, dd MMM", Locale.US).format(Date(clockNow)),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
 
         item {
@@ -268,7 +302,11 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Steps",
                         value = steps,
-                        helper = if (todayStepTotal != null) "B2 history" else "Awaiting B2 history",
+                        helper = when {
+                            todayStepTotal != null -> "Verified B1/B2 history"
+                            todayActivity != null -> "Verified activity packet"
+                            else -> "Awaiting step packet"
+                        },
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -286,7 +324,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Calories",
                         value = calories,
-                        helper = "Waiting for verified packet",
+                        helper = if (todayActivity != null) "Verified activity packet" else "Awaiting verified packet",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
@@ -304,13 +342,13 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Distance",
                         value = distance,
-                        helper = "No verified distance packet",
+                        helper = if (todayActivity != null) "Verified activity packet" else "Awaiting activity packet",
                     )
                     MetricCard(
                         modifier = Modifier.weight(1f),
                         title = "Active time",
                         value = activeMinutes,
-                        helper = "No verified active-time packet",
+                        helper = if (todayActivity != null) "Verified activity packet" else "Awaiting activity packet",
                     )
                 }
             }
@@ -323,7 +361,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Sync status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (syncing) "Syncing heart-rate history, B2 steps and available health data…"
+                        if (syncing) "Syncing watch clock, step history, sleep, HR, SpO₂ and verified activity packets…"
                         else "Last sync: $lastSyncLabel",
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -360,6 +398,40 @@ private fun HomeScreen(viewModel: MainViewModel) {
                     emptyMessage = "No SpO₂ history",
                 )
             }
+        }
+
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                DailyBarChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Steps by day",
+                    subtitle = "Latest 7 days",
+                    points = dailySteps,
+                    barColor = MaterialTheme.colorScheme.primary,
+                    valueLabel = { String.format(Locale.US, "%.0f", it) },
+                    emptyMessage = "No verified daily step history yet.",
+                )
+                DailyBarChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Sleep by day",
+                    subtitle = "Verified sleep stages",
+                    points = dailySleep,
+                    barColor = MaterialTheme.colorScheme.secondary,
+                    valueLabel = ::formatMinutesFloat,
+                    emptyMessage = "No verified sleep stages yet.",
+                )
+            }
+        }
+
+        item {
+            DailyDataSummaryCard(
+                stepHistory = stepHistory,
+                sleepHistory = sleepHistory,
+                nowMillis = clockNow,
+            )
         }
 
         item {
@@ -686,8 +758,132 @@ private fun HistoryScreen(viewModel: MainViewModel) {
     }
 }
 
-private fun formatHistoryTime(epochMillis: Long): String =
-    SimpleDateFormat("dd MMM HH:mm", Locale.US).format(Date(epochMillis))
+private fun formatDateTime12h(epochMillis: Long): String =
+    SimpleDateFormat("dd MMM, h:mm a", Locale.US).format(Date(epochMillis))
+
+private fun formatClockTime(epochMillis: Long): String =
+    SimpleDateFormat("h:mm a", Locale.US).format(Date(epochMillis))
+
+private fun formatHistoryTime(epochMillis: Long): String = formatDateTime12h(epochMillis)
+
+private fun isSameLocalDay(firstMillis: Long, secondMillis: Long): Boolean {
+    val first = Calendar.getInstance().apply { timeInMillis = firstMillis }
+    val second = Calendar.getInstance().apply { timeInMillis = secondMillis }
+    return first.get(Calendar.ERA) == second.get(Calendar.ERA) &&
+        first.get(Calendar.YEAR) == second.get(Calendar.YEAR) &&
+        first.get(Calendar.DAY_OF_YEAR) == second.get(Calendar.DAY_OF_YEAR)
+}
+
+private fun localDayStart(epochMillis: Long): Long =
+    Calendar.getInstance().apply {
+        timeInMillis = epochMillis
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+private fun buildDailyStepPoints(
+    history: List<app.watchdatasync.model.StepHistorySample>,
+    nowMillis: Long,
+): List<Pair<Long, Float>> {
+    val today = localDayStart(nowMillis)
+    val byDay = history.groupBy { localDayStart(it.epochMillis) }
+        .mapValues { (_, samples) -> samples.maxOfOrNull { it.totalSteps } ?: 0 }
+    return (0L..6L).mapNotNull { offset ->
+        val day = Calendar.getInstance().apply {
+            timeInMillis = today
+            add(Calendar.DAY_OF_YEAR, -offset.toInt())
+        }.timeInMillis
+        byDay[day]?.let { day to it.toFloat() }
+    }.sortedBy { it.first }
+}
+
+private fun buildDailySleepPoints(
+    history: List<app.watchdatasync.model.SleepStageSample>,
+    nowMillis: Long,
+): List<Pair<Long, Float>> {
+    val today = localDayStart(nowMillis)
+    val byDay = history.groupBy { localDayStart(it.epochMillis) }
+        .mapValues { (_, samples) -> samples.filter { it.stage in 1..3 }.sumOf { it.durationMinutes }.toFloat() }
+    return (0L..6L).mapNotNull { offset ->
+        val day = Calendar.getInstance().apply {
+            timeInMillis = today
+            add(Calendar.DAY_OF_YEAR, -offset.toInt())
+        }.timeInMillis
+        byDay[day]?.takeIf { it > 0f }?.let { day to it }
+    }.sortedBy { it.first }
+}
+
+private fun formatMinutesFloat(value: Float): String {
+    val total = value.toInt().coerceAtLeast(0)
+    val hours = total / 60
+    val mins = total % 60
+    return if (hours > 0) hours.toString() + "h " + mins + "m" else mins.toString() + "m"
+}
+
+@Composable
+private fun DailyDataSummaryCard(
+    stepHistory: List<app.watchdatasync.model.StepHistorySample>,
+    sleepHistory: List<app.watchdatasync.model.SleepStageSample>,
+    nowMillis: Long,
+) {
+    val days = (0L..6L).map { offset ->
+        Calendar.getInstance().apply {
+            timeInMillis = localDayStart(nowMillis)
+            add(Calendar.DAY_OF_YEAR, -offset.toInt())
+        }.timeInMillis
+    }.reversed()
+
+    val stepsByDay = stepHistory.groupBy { localDayStart(it.epochMillis) }
+        .mapValues { (_, samples) -> samples.maxOfOrNull { it.totalSteps } }
+    val sleepByDay = sleepHistory.groupBy { localDayStart(it.epochMillis) }
+        .mapValues { (_, samples) -> samples.filter { it.stage in 1..3 }.sumOf { it.durationMinutes } }
+
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("Daily data", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Latest seven calendar days • verified records only.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            days.forEach { day ->
+                val steps = stepsByDay[day]
+                val sleep = sleepByDay[day]?.takeIf { it > 0 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        SimpleDateFormat("EEE, dd MMM", Locale.US).format(Date(day)),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        steps?.let { it.toString() + " steps" } ?: "—",
+                        modifier = Modifier.width(82.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                    Text(
+                        sleep?.let(::formatMinutes) ?: "—",
+                        modifier = Modifier.width(70.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatMinutes(minutes: Int): String {
+    val hours = minutes / 60
+    val mins = minutes % 60
+    return if (hours > 0) hours.toString() + "h " + mins + "m" else mins.toString() + "m"
+}
 
 private fun formatDistanceMeters(meters: Int): String =
     String.format(Locale.US, "%.2f km", meters / 1000.0)
