@@ -146,3 +146,13 @@ Current goal for the next continuation:
 - The related SDK documentation states daily B2 records do not contain distance; its vendor app calculates daily distance from steps and the user profile, while workout distance is GPS-driven. No calorie-history source was verified for this FT_38093 capture. Calories/distance therefore remain unverified rather than being fabricated.
 - The previous 6001 / 347 / 2.29 km watch-display values remain validation targets, not values extracted from the latest 26 01 packet.
 - UI wording now distinguishes verified B2 steps from unverified calorie/distance data.
+
+
+## FT_38093 sync transaction fix — 2026-09-18 continuation
+
+- v0.3.5 changes the history queue from settle-delay-only writes to response-aware transactions for the verified B2 step history, F7 heart-rate history, SpO2 34 FA history, and 31 01 sleep history.
+- B2 now waits for B2 notifications before advancing, with a timeout and quiet window. Sleep waits for the observed 31 02 completion marker. HR/SpO2 history similarly wait for matching response packets.
+- Fresh live E5 heart-rate readings are now also persisted into the app's HR history at one sample per minute bucket, so new heart data is not only shown live and discarded.
+- Home Today Steps now reads the verified B2 step-history total directly instead of the discarded/unverified daily-activity decoder.
+- 0x26 is not used for health sync on this firmware. No calorie or distance field is currently verified. 0xAA/0xB1 are retained as activity-status candidate frames only; their fields are not yet decoded.
+- v0.3.5 is the next hardware-validation build. The key diagnostic evidence is SYNC_RESPONSE for Sync step history followed by SYNC_DATA step-history, and SYNC_RESPONSE for Sync heart-rate history followed by SYNC_DATA heart-rate history page.
