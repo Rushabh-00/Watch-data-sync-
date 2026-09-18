@@ -71,6 +71,7 @@ The app now has an automatic FT_38093 sync path on the direct BLE/GATT connectio
 - today's activity summary now uses the verified B2 cumulative step-history records (18-byte records); the previous 0x26 interpretation was removed because 0x26 is watch-face/dial protocol, not activity data
 - watch battery response, heart-rate history, SpO₂ history and step-history requests are persisted for the product UI
 - calories and distance are not fabricated from B2: the verified B2 layout contains cumulative steps plus run/walk subcounts, but no calorie/distance fields
+- a safe AA step/sleep status query is also sent so the next hardware capture can identify any FT_38093 status response that carries the watch's displayed calories/distance
 - History now shows synced heart-rate and SpO₂ records instead of only raw discovery captures
 - the normal Home flow auto-discovers the FT_38093 watch and syncs automatically after connection
 - the 14-byte EB 01 ... vendor records observed on 33F2 are retained as protocol evidence but their later fields are still not assigned to steps/stress/workout semantics without direct evidence
