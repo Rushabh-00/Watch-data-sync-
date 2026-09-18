@@ -450,7 +450,7 @@ private fun WatchScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Only compatible Fastrack watches are shown",
+                text = "FT_38093 only • bound watch reconnects automatically",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -673,15 +673,22 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        "Showing latest " + minOf(logs.size, 300) + " of " + logs.size +
-                            " lines. Copy log exports the full capture.",
+                        "Connection and discovery events only. Heart-rate measurement packets are omitted. " +
+                            "Showing latest " + minOf(logs.size, 120) + " of " + logs.size + " events.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text(
-                        logs.takeLast(300).joinToString("\n").ifBlank { "No events yet." },
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        logs.takeLast(120)
+                            .filterNot(::isHeartRateLog)
+                            .map(::humanReadableLogLine)
+                            .forEach { line ->
+                                Text(
+                                    line,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                    }
                 }
             }
         }
@@ -697,10 +704,24 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
+                    val nonHeartRate = values.filterNot(::isHeartRateCapture)
+                    val characteristicCount = nonHeartRate
+                        .map { it.characteristicUuid.lowercase(Locale.ROOT) }
+                        .distinct()
+                        .size
                     Text(
-                        "Showing latest " +
-                            minOf(values.count { !isHeartRateCapture(it) }, 60) +
-                            " non-heart-rate packets.",
+                        "Rolling 24-hour capture • " + nonHeartRate.size +
+                            " packets • " + characteristicCount + " active data channels",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        if (connected) {
+                            "Keep the watch connected while opening one watch feature at a time " +
+                                "(SpO₂, sleep, stress, steps, workout). Clear capture before each test."
+                        } else {
+                            "Reconnect the bound watch to continue passive protocol capture."
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -738,6 +759,54 @@ private fun DiagnosticsScreen(viewModel: MainViewModel) {
     }
 }
 
+private fun isHeartRateLog(line: String): Boolean {
+    val lower = line.lowercase(Locale.ROOT)
+    return lower.contains(UUID_HEART_RATE) ||
+        (lower.contains(UUID_VENDOR_HEART_RATE) && lower.contains("e5 11 00"))
+}
+
+private fun humanReadableLogLine(line: String): String {
+    val lower = line.lowercase(Locale.ROOT)
+
+    return when {
+        isHeartRateLog(line) -> ""
+        line.startsWith("CONNECT ") ->
+            "Watch connection started"
+        line.startsWith("STATE ") && lower.contains("connected") ->
+            "BLE connected • service discovery starting"
+        line.startsWith("STATE ") && lower.contains("disconnected") ->
+            "BLE disconnected"
+        line.startsWith("DISCOVER ") ->
+            "GATT service discovery requested"
+        line.startsWith("SERVICES status=0") ->
+            "GATT services discovered successfully"
+        line.startsWith("MTU ") ->
+            line.replace("MTU ", "MTU negotiated • ")
+        line.startsWith("PROTOCOL ") ->
+            "Protocol match • FT_38093 live-data channel detected"
+        line.startsWith("RECONNECT ") ->
+            "Automatic reconnect • " + line.removePrefix("RECONNECT ")
+        line.startsWith("DISCONNECT_REASON ") ->
+            "Disconnect • " + line.removePrefix("DISCONNECT_REASON ")
+        line.startsWith("ERROR ") ->
+            "Error • " + line.removePrefix("ERROR ")
+        line.startsWith("CCCD ") -> {
+            val status = line.substringAfter("status=", "")
+            "Notification setup • " + line.substringBefore(" status=") +
+                " • " + if (status == "0") "ready" else "status $status"
+        }
+        line.startsWith("NOTIFY ") ->
+            "Notification channel setup • " +
+                line.substringAfter("NOTIFY ").substringBefore(" descriptorWrite=")
+        line.startsWith("READ ") ->
+            "Read requested • " + line.substringAfter("READ ")
+        line.startsWith("READ_RESULT ") ->
+            "Read result • " + line.removePrefix("READ_RESULT ")
+        else ->
+            line
+    }
+}
+
 private fun buildDiagnosticsClipboardText(
     connected: Boolean,
     services: List<app.watchdatasync.model.GattService>,
@@ -747,7 +816,9 @@ private fun buildDiagnosticsClipboardText(
     appendLine("WATCH DATA SYNC DIAGNOSTICS")
     appendLine("Connection: " + if (connected) "CONNECTED" else "DISCONNECTED")
     appendLine("Heart-rate packets: OMITTED (already decoded by the app)")
-    appendLine("Capture retention: last 24 hours")
+    appendLine("Capture retention: rolling last 24 hours")
+    appendLine("Purpose: discover unknown FT_38093 data channels such as SpO₂, sleep, stress, steps, workouts and history")
+    appendLine("Heart-rate packets: omitted from capture and event log because live HR is already decoded in the app")
     appendLine()
 
     val nonHeartRate = values.filterNot { isHeartRateCapture(it) }
@@ -772,8 +843,9 @@ private fun buildDiagnosticsClipboardText(
     }
 
     appendLine()
-    appendLine("RAW EVENT LOG (" + logs.size + " lines)")
-    logs.filterNot { it.contains(UUID_VENDOR_HEART_RATE, ignoreCase = true) }.forEach(::appendLine)
+    val readableLogs = logs.filterNot(::isHeartRateLog)
+    appendLine("HUMAN-READABLE EVENT LOG (" + readableLogs.size + " events)")
+    readableLogs.map(::humanReadableLogLine).filter { it.isNotBlank() }.forEach(::appendLine)
 }
 
 private fun appendGroupedCaptureLines(
@@ -1046,9 +1118,13 @@ private fun CapturedValueRow(value: GattValue) {
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                value.decoded ?: value.characteristicUuid,
+                friendlyCharacteristicLabel(value.characteristicUuid),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                humanReadableDecode(value),
+                style = MaterialTheme.typography.bodySmall,
             )
             Text(
                 value.timestamp + " • " + value.characteristicUuid,
