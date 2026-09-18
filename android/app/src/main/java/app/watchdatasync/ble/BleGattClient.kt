@@ -786,6 +786,7 @@ class BleGattClient(private val context: Context) {
             _connected.value = false
             _services.value = emptyList()
             _liveHeartRate.value = null
+            characteristicServiceUuids.clear()
             clearOperationQueue()
             runCatching { gatt.close() }
 
@@ -1125,15 +1126,7 @@ class BleGattClient(private val context: Context) {
         if (!matchedVendorProtocol || value.isEmpty()) return
 
         val uuid = characteristicUuid.lowercase(Locale.ROOT)
-        val observedVendorNotifyChannels = setOf(
-            CHAR_33F2_UUID,
-            CHAR_34F2_UUID,
-            CHAR_6002_UUID,
-            CHAR_6102_UUID,
-            CHAR_FD04_UUID,
-            CHAR_6487_UUID,
-        )
-        if (uuid !in observedVendorNotifyChannels) return
+        if (uuid !in OBSERVED_VENDOR_NOTIFY_CHANNELS) return
 
         noteSyncResponse(uuid, value)
 
@@ -1907,6 +1900,25 @@ class BleGattClient(private val context: Context) {
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
         const val CAPTURE_PERSIST_DELAY_MS = 2_000L
         const val MAX_CAPTURE_VALUES = 20_000
+        const val MAX_LOG_VALUES = 5_000
+        const val CAPTURE_UI_REFRESH_MS = 250L
+        const val LOG_UI_REFRESH_MS = 100L
+        val OBSERVED_VENDOR_NOTIFY_CHANNELS = setOf(
+            CHAR_33F2_UUID,
+            CHAR_34F2_UUID,
+            CHAR_6002_UUID,
+            CHAR_6102_UUID,
+            CHAR_FD04_UUID,
+            CHAR_6487_UUID,
+        )
+        val STANDARD_TEXT_CHARACTERISTIC_UUIDS = setOf(
+            "00002a24-0000-1000-8000-00805f9b34fb",
+            "00002a25-0000-1000-8000-00805f9b34fb",
+            "00002a26-0000-1000-8000-00805f9b34fb",
+            "00002a27-0000-1000-8000-00805f9b34fb",
+            "00002a28-0000-1000-8000-00805f9b34fb",
+            "00002a29-0000-1000-8000-00805f9b34fb",
+        )
         const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         const val BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
         const val HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
