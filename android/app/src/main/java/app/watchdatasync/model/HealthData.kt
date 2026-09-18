@@ -18,3 +18,9 @@ data class DailyActivitySummary(
     val activeMinutes: Int,
 )
 
+data class SleepStageSample(
+    val epochMillis: Long,
+    val stage: Int,
+    val durationMinutes: Int,
+)
+
