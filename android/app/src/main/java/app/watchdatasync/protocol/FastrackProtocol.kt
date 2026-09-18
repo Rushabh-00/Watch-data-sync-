@@ -60,6 +60,12 @@ class FastrackProtocol : WatchProtocol {
             if (bpm in 30..220) {
                 return "Heart rate $bpm bpm"
             }
+            return "Heart-rate frame • raw value $bpm • no valid live BPM"
+        }
+
+        if (uuid == CHAR_33F2_UUID && packet.firstOrNull()?.toInt()?.and(0xFF) == 0x44) {
+            return "FT_38093 vendor frame • " +
+                packet.joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
         }
 
         return null
