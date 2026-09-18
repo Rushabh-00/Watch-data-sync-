@@ -147,7 +147,7 @@ class FastrackProtocol : WatchProtocol {
                 writeWithoutResponse = false,
                 settleDelayMs = 250L,
                 responseTimeoutMs = 15_000L,
-                responseQuietWindowMs = 500L,
+                responseQuietWindowMs = 0L,
                 responsePrefixes = listOf(hex("31"), hex("32")),
                 completeResponsePrefix = hex("31 02"),
             ),
