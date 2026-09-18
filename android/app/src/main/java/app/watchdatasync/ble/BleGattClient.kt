@@ -225,8 +225,6 @@ class BleGattClient(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun enqueueStandardCharacteristics(currentGatt: BluetoothGatt) {
         val known = setOf(
-            BATTERY_LEVEL_UUID,
-            HEART_RATE_MEASUREMENT_UUID,
             SPO2_CONTINUOUS_UUID,
             SPO2_SPOT_CHECK_UUID,
         )
@@ -773,6 +771,12 @@ class BleGattClient(private val context: Context) {
             service.characteristics.any { it.uuid == characteristic.uuid }
         }?.uuid?.toString() ?: "unknown"
 
+        val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
+        if (uuid == BATTERY_LEVEL_UUID) {
+            appendLog("BATTERY standard packet omitted from protocol capture value=" + hex(value))
+            return
+        }
+
         val standardDecoded = decodeStandardValue(characteristic.uuid, value)
         val vendorDecoded =
             if (matchedVendorProtocol) {
@@ -895,121 +899,16 @@ class BleGattClient(private val context: Context) {
     }
 
     private fun diagnosticByteSummary(value: ByteArray): String {
-        if (value.isEmpty()) return "RAW bytes[0]"
+        if (value.isEmpty()) return "Unknown packet • 0 bytes"
 
-        val u8 = value.joinToString(", ") { (it.toInt() and 0xFF).toString() }
-        val s8 = value.joinToString(", ") { it.toInt().toString() }
-        val u16Le = if (value.size >= 2) {
-            (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                (
-                    (value[index].toInt() and 0xFF) or
-                        ((value[index + 1].toInt() and 0xFF) shl 8)
-                    ).toString()
-            }
-        } else {
-            "—"
-        }
-        val s16Le = if (value.size >= 2) {
-            (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                val raw =
-                    (value[index].toInt() and 0xFF) or
-                        ((value[index + 1].toInt() and 0xFF) shl 8)
-                raw.toShort().toString()
-            }
-        } else "—"
-
-        val u16Be = if (value.size >= 2) {
-            (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                (
-                    ((value[index].toInt() and 0xFF) shl 8) or
-                        (value[index + 1].toInt() and 0xFF)
-                    ).toString()
-            }
-        } else {
-            "—"
-        }
-
-        val s16Be = if (value.size >= 2) {
-            (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                val raw =
-                    ((value[index].toInt() and 0xFF) shl 8) or
-                        (value[index + 1].toInt() and 0xFF)
-                raw.toShort().toString()
-            }
-        } else "—"
-
-        val u32Le = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                (
-                    (value[index].toLong() and 0xFF) or
-                        ((value[index + 1].toLong() and 0xFF) shl 8) or
-                        ((value[index + 2].toLong() and 0xFF) shl 16) or
-                        ((value[index + 3].toLong() and 0xFF) shl 24)
-                    ).toString()
-            }
-        } else {
-            "—"
-        }
-
-        val s32Le = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                val raw =
-                    (value[index].toLong() and 0xFF) or
-                        ((value[index + 1].toLong() and 0xFF) shl 8) or
-                        ((value[index + 2].toLong() and 0xFF) shl 16) or
-                        ((value[index + 3].toLong() and 0xFF) shl 24)
-                raw.toInt().toString()
-            }
-        } else "—"
-
-        val u32Be = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                (
-                    ((value[index].toLong() and 0xFF) shl 24) or
-                        ((value[index + 1].toLong() and 0xFF) shl 16) or
-                        ((value[index + 2].toLong() and 0xFF) shl 8) or
-                        (value[index + 3].toLong() and 0xFF)
-                    ).toString()
-            }
-        } else "—"
-
-        val s32Be = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                val raw =
-                    ((value[index].toLong() and 0xFF) shl 24) or
-                        ((value[index + 1].toLong() and 0xFF) shl 16) or
-                        ((value[index + 2].toLong() and 0xFF) shl 8) or
-                        (value[index + 3].toLong() and 0xFF)
-                raw.toInt().toString()
-            }
-        } else "—"
-
-        val float32Le = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                val raw =
-                    (value[index].toInt() and 0xFF) or
-                        ((value[index + 1].toInt() and 0xFF) shl 8) or
-                        ((value[index + 2].toInt() and 0xFF) shl 16) or
-                        ((value[index + 3].toInt() and 0xFF) shl 24)
-                Float.fromBits(raw).let { if (it.isFinite()) String.format(Locale.US, "%.6f", it) else it.toString() }
-            }
-        } else "—"
-
-        val float32Be = if (value.size >= 4) {
-            (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                val raw =
-                    ((value[index].toInt() and 0xFF) shl 24) or
-                        ((value[index + 1].toInt() and 0xFF) shl 16) or
-                        ((value[index + 2].toInt() and 0xFF) shl 8) or
-                        (value[index + 3].toInt() and 0xFF)
-                Float.fromBits(raw).let { if (it.isFinite()) String.format(Locale.US, "%.6f", it) else it.toString() }
-            }
-        } else "—"
-
-        val bits0 = "%8s".format((value.first().toInt() and 0xFF).toString(2)).replace(" ", "0")
-
-        return "RAW bytes[${value.size}] HEX=${hex(value)} • U8=[${u8}] • S8=[${s8}] • U16LE=[${u16Le}] • S16LE=[${s16Le}] • U16BE=[${u16Be}] • S16BE=[${s16Be}] • U32LE=[${u32Le}] • S32LE=[${s32Le}] • U32BE=[${u32Be}] • S32BE=[${s32Be}] • F32LE=[${float32Le}] • F32BE=[${float32Be}] • BITS0=${bits0} • ASCII=${ascii(value)}"
+        return "Unknown packet • " +
+            value.size +
+            " bytes • HEX=" +
+            hex(value) +
+            " • ASCII=" +
+            ascii(value)
     }
+
 
     private fun decodeStandardValue(
         uuid: UUID,
