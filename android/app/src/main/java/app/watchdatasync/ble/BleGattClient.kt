@@ -343,7 +343,12 @@ class BleGattClient(private val context: Context) {
         val next = operationQueue.removeFirst()
         val key = operationKey(next)
 
-        if (next.gatt !== currentGatt) {
+        val operationGatt = when (next) {
+            is GattOperation.Read -> next.gatt
+            is GattOperation.EnableNotification -> next.gatt
+        }
+
+        if (operationGatt !== currentGatt) {
             queuedOperationKeys.remove(key)
             startNextOperation()
             return
