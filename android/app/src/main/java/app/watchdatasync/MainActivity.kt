@@ -135,9 +135,9 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
     }
 
-    val heartRate = latestDecoded(values, UUID_HEART_RATE) ?: "—"
-    val spo2 = latestDecoded(values, UUID_SPO2) ?: "—"
-    val battery = latestDecoded(values, UUID_BATTERY) ?: "—"
+    val heartRate = if (connected) latestDecoded(values, UUID_HEART_RATE) ?: "—" else "—"
+    val spo2 = if (connected) latestDecoded(values, UUID_SPO2) ?: "—" else "—"
+    val battery = if (connected) latestDecoded(values, UUID_BATTERY) ?: "—" else "—"
 
     LazyColumn(
         modifier = Modifier
@@ -262,7 +262,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                         modifier = Modifier.weight(1f),
                         title = "Battery",
                         value = battery,
-                        helper = "Standard BLE",
+                        helper = "Watch BLE • live read",
                     )
                 }
 
@@ -293,7 +293,7 @@ private fun HomeScreen(viewModel: MainViewModel) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Data availability", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Heart rate, SpO₂ and battery can use standard BLE characteristics when the watch exposes them.",
+                        "Heart rate, SpO₂ and battery are shown only while the BLE watch connection is active.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
