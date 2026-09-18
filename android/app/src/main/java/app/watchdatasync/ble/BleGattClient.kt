@@ -1148,7 +1148,7 @@ class BleGattClient(private val context: Context) {
         const val CAPTURE_KEY = "packets"
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
         const val CAPTURE_PERSIST_DELAY_MS = 2_000L
-        const val MAX_CAPTURE_VALUES = 5_000
+        const val MAX_CAPTURE_VALUES = 20_000
         const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         const val BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
         const val HEART_RATE_MEASUREMENT_UUID = "00002a37-0000-1000-8000-00805f9b34fb"
