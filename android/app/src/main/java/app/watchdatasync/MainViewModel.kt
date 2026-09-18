@@ -5,7 +5,10 @@ import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import app.watchdatasync.ble.BleGattClient
 import app.watchdatasync.ble.BleScanner
 import app.watchdatasync.model.WatchDevice
@@ -14,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val scanner = BleScanner(application)
     private val gattClient = BleGattClient(application)
+    private var automaticDiscoveryEnabled = false
     private val preferences =
         application.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
 
@@ -32,8 +36,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val values = gattClient.values
     val logs = gattClient.logs
     val error = gattClient.error
+    val heartRateHistory = gattClient.heartRateHistory
+    val spo2History = gattClient.spo2History
+    val dailyActivity = gattClient.dailyActivity
+    val batteryPercent = gattClient.batteryPercent
+    val lastSyncAt = gattClient.lastSyncAt
+    val syncing = gattClient.syncing
+
+    init {
+        scanner.onCompatibleDeviceFound = { device ->
+            if (automaticDiscoveryEnabled && !connected.value) {
+                connect(device.address)
+            }
+        }
+    }
 
     fun startScan() = scanner.start(_boundWatchAddress.value)
+
+    fun startAutomaticWatchDiscovery() {
+        if (connected.value) return
+        automaticDiscoveryEnabled = true
+
+        val boundAddress = _boundWatchAddress.value
+        if (boundAddress != null) {
+            autoConnectBoundWatch()
+            viewModelScope.launch {
+                delay(2_500L)
+                if (!connected.value && automaticDiscoveryEnabled) {
+                    scanner.start(boundAddress, autoConnectFirst = true)
+                }
+            }
+        } else {
+            scanner.start(null, autoConnectFirst = true)
+        }
+    }
 
     fun stopScan() = scanner.stop()
 
@@ -79,7 +115,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun enableNotifications(serviceUuid: String, characteristicUuid: String): Boolean =
         gattClient.enableNotifications(serviceUuid, characteristicUuid)
 
-    fun refreshStandardData() = gattClient.refreshStandardData()
+    fun refreshStandardData() = gattClient.syncNow()
+
+    fun syncNow() = gattClient.syncNow()
 
     @SuppressLint("MissingPermission")
     fun autoConnectBoundWatch() {
@@ -117,7 +155,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markCapture(label: String) = gattClient.markCapture(label)
 
-    fun disconnect() = gattClient.disconnect()
+    fun disconnect() {
+        automaticDiscoveryEnabled = false
+        scanner.stop()
+        gattClient.disconnect()
+    }
 
     private companion object {
         const val PREFS_NAME = "watch_preferences"
