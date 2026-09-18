@@ -796,16 +796,20 @@ class BleGattClient(private val context: Context) {
         val u8 = value.joinToString(", ") { (it.toInt() and 0xFF).toString() }
         val u16Le = if (value.size >= 2) {
             (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                (value[index].toInt() and 0xFF) or
-                    ((value[index + 1].toInt() and 0xFF) shl 8)
+                (
+                    (value[index].toInt() and 0xFF) or
+                        ((value[index + 1].toInt() and 0xFF) shl 8)
+                    ).toString()
             }
         } else {
             "—"
         }
         val u16Be = if (value.size >= 2) {
             (0 until value.size - 1 step 2).joinToString(", ") { index ->
-                ((value[index].toInt() and 0xFF) shl 8) or
-                    (value[index + 1].toInt() and 0xFF)
+                (
+                    ((value[index].toInt() and 0xFF) shl 8) or
+                        (value[index + 1].toInt() and 0xFF)
+                    ).toString()
             }
         } else {
             "—"
@@ -813,10 +817,12 @@ class BleGattClient(private val context: Context) {
 
         val u32Le = if (value.size >= 4) {
             (0 until value.size - 3 step 4).joinToString(", ") { index ->
-                (value[index].toLong() and 0xFF) or
-                    ((value[index + 1].toLong() and 0xFF) shl 8) or
-                    ((value[index + 2].toLong() and 0xFF) shl 16) or
-                    ((value[index + 3].toLong() and 0xFF) shl 24)
+                (
+                    (value[index].toLong() and 0xFF) or
+                        ((value[index + 1].toLong() and 0xFF) shl 8) or
+                        ((value[index + 2].toLong() and 0xFF) shl 16) or
+                        ((value[index + 3].toLong() and 0xFF) shl 24)
+                    ).toString()
             }
         } else {
             "—"
