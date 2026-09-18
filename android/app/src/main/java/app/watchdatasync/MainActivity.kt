@@ -121,6 +121,8 @@ private fun HomeScreen(viewModel: MainViewModel) {
     val connected by viewModel.connected.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
     val liveHeartRate by viewModel.liveHeartRate.collectAsStateWithLifecycle()
+    val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
+    val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
     val boundWatchName by viewModel.boundWatchName.collectAsStateWithLifecycle()
     val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
     val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
@@ -343,6 +345,32 @@ private fun HomeScreen(viewModel: MainViewModel) {
         }
 
         item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                TrendChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "HR trend",
+                    subtitle = "Latest history",
+                    points = heartRateHistory.takeLast(24).map { it.epochMillis to it.bpm.toFloat() },
+                    lineColor = MaterialTheme.colorScheme.primary,
+                    unit = "bpm",
+                    emptyMessage = "No HR history",
+                )
+                TrendChartCard(
+                    modifier = Modifier.weight(1f),
+                    title = "SpO₂ trend",
+                    subtitle = "Latest history",
+                    points = spo2History.takeLast(24).map { it.epochMillis to it.percent.toFloat() },
+                    lineColor = MaterialTheme.colorScheme.secondary,
+                    unit = "%",
+                    emptyMessage = "No SpO₂ history",
+                )
+            }
+        }
+
+        item {
             Text(
                 text = "Recent captured data",
                 style = MaterialTheme.typography.titleLarge,
@@ -374,9 +402,12 @@ private fun HomeScreen(viewModel: MainViewModel) {
 
 @Composable
 private fun HistoryScreen(viewModel: MainViewModel) {
+    val connected by viewModel.connected.collectAsStateWithLifecycle()
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val heartRateHistory by viewModel.heartRateHistory.collectAsStateWithLifecycle()
     val spo2History by viewModel.spo2History.collectAsStateWithLifecycle()
     val dailyActivity by viewModel.dailyActivity.collectAsStateWithLifecycle()
+    val activityProbeStatus by viewModel.activityProbeStatus.collectAsStateWithLifecycle()
     val sleepHistory by viewModel.sleepHistory.collectAsStateWithLifecycle()
     val values by viewModel.values.collectAsStateWithLifecycle()
 
@@ -387,15 +418,57 @@ private fun HistoryScreen(viewModel: MainViewModel) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Text(
-                text = "History",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Synced watch history",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = "History",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Trends and verified watch history",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedButton(
+                    onClick = { viewModel.syncNow() },
+                    enabled = connected && !syncing,
+                ) {
+                    Text(if (syncing) "Syncing…" else "Sync now")
+                }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            ) {
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        "Activity sync",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        activityProbeStatus,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "Steps and calories stay hidden until a valid FT_38093 response is received.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
         item {
@@ -484,6 +557,28 @@ private fun HistoryScreen(viewModel: MainViewModel) {
                     }
                 }
             }
+        }
+
+        item {
+            TrendChartCard(
+                title = "Heart-rate trend",
+                subtitle = "Latest synced history",
+                points = heartRateHistory.takeLast(48).map { it.epochMillis to it.bpm.toFloat() },
+                lineColor = MaterialTheme.colorScheme.primary,
+                unit = "bpm",
+                emptyMessage = "No heart-rate history yet.",
+            )
+        }
+
+        item {
+            TrendChartCard(
+                title = "SpO₂ trend",
+                subtitle = "Latest synced history",
+                points = spo2History.takeLast(48).map { it.epochMillis to it.percent.toFloat() },
+                lineColor = MaterialTheme.colorScheme.secondary,
+                unit = "%",
+                emptyMessage = "No SpO₂ history yet.",
+            )
         }
 
         item {

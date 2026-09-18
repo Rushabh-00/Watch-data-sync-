@@ -39,6 +39,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val heartRateHistory = gattClient.heartRateHistory
     val spo2History = gattClient.spo2History
     val dailyActivity = gattClient.dailyActivity
+    val activityProbeStatus = gattClient.activityProbeStatus
     val sleepHistory = gattClient.sleepHistory
     val batteryPercent = gattClient.batteryPercent
     val lastSyncAt = gattClient.lastSyncAt

@@ -26,6 +26,8 @@ class FastrackProtocolTest {
         assertTrue(payloads.contains("B2 FA"))
         assertTrue(payloads.contains("31 01"))
         assertTrue(payloads.contains("34 FA"))
+        assertTrue(payloads.indexOf("26 01") < payloads.indexOf("B2 FA"))
+        assertTrue(payloads.indexOf("26 01") < payloads.indexOf("31 01"))
     }
 
     @Test

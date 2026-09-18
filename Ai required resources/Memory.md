@@ -121,3 +121,12 @@ Current goal for the next continuation:
 - The same capture shows `31 01` session markers for 12–18 Sep followed directly by `31 02`, with no `32` or `CB` sleep-stage/batch packets. Sleep decoding therefore also remains unvalidated on this firmware.
 - v0.3.2 adds explicit `SYNC_PLAN` diagnostics so a hardware run can verify that the activity probe is actually queued before interpreting any response.
 - Do not claim that the watch returned 6001 steps / 347 Cal / 2.29 km over BLE yet. Those remain the watch-display validation targets from the prior observation.
+ 
+## UI + activity response validation iteration — 2026-09-18 18:19 UTC
+
+- The supplied screenshot shows the v0.3.2 diagnostics path now queues and starts the `26 01` activity probe, but the visible History screen still has Steps and Calories as —. The screenshot does not show a decoded `26 01` response, so the activity values are still not validated from the watch in this run.
+- The app remains intentionally gated to verified activity data; it must not display the earlier incorrect 50030 / 377 values.
+- The sync client now exposes an explicit activity-probe status, waits for the GATT operation queue to become idle before marking sync complete, and marks the activity probe as unverified when no valid `26 01` response arrived.
+- Vendor response parsing is allowed on the observed FT_38093 notification channels (33F2, 34F2, 6002, 6102, FD04 and 6487) without assigning those channels new semantics. A valid packet is still accepted only when it matches the already-tested `26 01` activity layout.
+- History UI is upgraded with verified Today cards, HR/SpO₂ trend charts, sleep-stage visualization, data-integrity status and a Sync Now action. Chart data is drawn from records already persisted by the app; no synthetic values are introduced.
+- Version 0.3.3 is the next validation build. After installation, the critical hardware evidence is a `SYNC_DATA activity=` line with actual 26 01 response bytes followed by Today showing the same watch values.

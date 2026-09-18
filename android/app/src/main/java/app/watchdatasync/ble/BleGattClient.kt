@@ -101,6 +101,8 @@ class BleGattClient(private val context: Context) {
     val spo2History: StateFlow<List<Spo2HistorySample>> = _spo2History.asStateFlow()
     private val _dailyActivity = MutableStateFlow<DailyActivitySummary?>(null)
     val dailyActivity: StateFlow<DailyActivitySummary?> = _dailyActivity.asStateFlow()
+    private val _activityProbeStatus = MutableStateFlow("Waiting for verified activity response")
+    val activityProbeStatus: StateFlow<String> = _activityProbeStatus.asStateFlow()
     private val _sleepHistory = MutableStateFlow<List<SleepStageSample>>(emptyList())
     val sleepHistory: StateFlow<List<SleepStageSample>> = _sleepHistory.asStateFlow()
     private val _batteryPercent = MutableStateFlow<Int?>(null)
@@ -111,6 +113,7 @@ class BleGattClient(private val context: Context) {
     val syncing: StateFlow<Boolean> = _syncing.asStateFlow()
     private var syncFinishRunnable: Runnable? = null
     private var syncRequested = false
+    private var activityProbeResponseReceived = false
     private var sleepSessionDate: Calendar? = null
 
     init {
@@ -118,6 +121,11 @@ class BleGattClient(private val context: Context) {
         _heartRateHistory.value = loadHeartRateHistory()
         _spo2History.value = loadSpo2History()
         _dailyActivity.value = loadDailyActivity()
+        _activityProbeStatus.value = if (_dailyActivity.value != null) {
+            "Verified activity summary available from the last successful response"
+        } else {
+            "Waiting for verified activity response"
+        }
         _sleepHistory.value = loadSleepHistory()
         _batteryPercent.value = dataPrefs.getInt(KEY_BATTERY, -1).takeIf { it in 0..100 }
         _lastSyncAt.value = dataPrefs.getLong(KEY_LAST_SYNC, 0L).takeIf { it > 0L }
@@ -367,17 +375,24 @@ class BleGattClient(private val context: Context) {
         }
 
         syncRequested = true
+        activityProbeResponseReceived = false
+        _activityProbeStatus.value = "Sync started • waiting for FT_38093 26 01 response"
         _syncing.value = true
         _error.value = null
         appendLog("SYNC_START FT_38093 automatic health/history sync")
 
         val now = Calendar.getInstance()
         val syncCommands = fastrackProtocol.buildAutomaticSyncCommands(now)
+        val activityProbeQueued = syncCommands.any {
+            it.payload.contentEquals(byteArrayOf(0x26, 0x01))
+        }
         appendLog(
             "SYNC_PLAN FT_38093 commands=" + syncCommands.size +
-                " activityProbe=" +
-                syncCommands.any { it.payload.contentEquals(byteArrayOf(0x26, 0x01)) },
+                " activityProbe=" + activityProbeQueued,
         )
+        if (activityProbeQueued) {
+            _activityProbeStatus.value = "26 01 queued • waiting for the watch response"
+        }
         syncCommands.forEach { command ->
             val characteristic = when (command.characteristicUuid.lowercase(Locale.ROOT)) {
                 CHAR_33F1_UUID -> channel1
@@ -403,17 +418,7 @@ class BleGattClient(private val context: Context) {
         }
 
         appendLog("SYNC_PLAN FT_38093 activity probe queued before step/sleep history")
-        syncFinishRunnable?.let(handler::removeCallbacks)
-        val runnable = Runnable {
-            syncRequested = false
-            _syncing.value = false
-            val stamp = System.currentTimeMillis()
-            _lastSyncAt.value = stamp
-            dataPrefs.edit().putLong(KEY_LAST_SYNC, stamp).apply()
-            appendLog("SYNC_COMPLETE FT_38093")
-        }
-        syncFinishRunnable = runnable
-        handler.postDelayed(runnable, SYNC_COMPLETE_DELAY_MS)
+        scheduleSyncCompletionIfIdle()
     }
 
     private fun enqueueRead(
@@ -552,6 +557,13 @@ class BleGattClient(private val context: Context) {
                     next.characteristic.value = next.value
                     @Suppress("DEPRECATION")
                     val started = currentGatt.writeCharacteristic(next.characteristic)
+                    val isActivityProbe =
+                        next.value.size >= 2 &&
+                            (next.value[0].toInt() and 0xFF) == 0x26 &&
+                            (next.value[1].toInt() and 0xFF) == 0x01
+                    if (isActivityProbe) {
+                        _activityProbeStatus.value = "26 01 write started • waiting for verified response"
+                    }
                     appendLog(
                         "WRITE " + next.characteristic.uuid +
                             " started=" + started +
@@ -601,7 +613,30 @@ class BleGattClient(private val context: Context) {
             is GattOperation.Write -> active.settleDelayMs
             else -> GATT_OPERATION_GAP_MS
         }
-        handler.postDelayed({ startNextOperation() }, delay)
+        handler.postDelayed({
+            startNextOperation()
+            scheduleSyncCompletionIfIdle()
+        }, delay)
+    }
+
+    private fun scheduleSyncCompletionIfIdle() {
+        if (!syncRequested || activeOperation != null || operationQueue.isNotEmpty()) return
+
+        syncFinishRunnable?.let(handler::removeCallbacks)
+        val runnable = Runnable {
+            if (!syncRequested || activeOperation != null || operationQueue.isNotEmpty()) return@Runnable
+            syncRequested = false
+            _syncing.value = false
+            val stamp = System.currentTimeMillis()
+            _lastSyncAt.value = stamp
+            dataPrefs.edit().putLong(KEY_LAST_SYNC, stamp).apply()
+            if (!activityProbeResponseReceived) {
+                _activityProbeStatus.value = "No verified 26 01 activity response in this sync"
+            }
+            appendLog("SYNC_COMPLETE FT_38093")
+        }
+        syncFinishRunnable = runnable
+        handler.postDelayed(runnable, SYNC_QUIET_AFTER_QUEUE_MS)
     }
 
     private fun operationKey(operation: GattOperation): String = when (operation) {
@@ -998,9 +1033,17 @@ class BleGattClient(private val context: Context) {
         value: ByteArray,
     ) {
         if (!matchedVendorProtocol || value.isEmpty()) return
-        if (!characteristicUuid.equals(CHAR_33F2_UUID, ignoreCase = true) &&
-            !characteristicUuid.equals(CHAR_34F2_UUID, ignoreCase = true)
-        ) return
+
+        val uuid = characteristicUuid.lowercase(Locale.ROOT)
+        val observedVendorNotifyChannels = setOf(
+            CHAR_33F2_UUID,
+            CHAR_34F2_UUID,
+            CHAR_6002_UUID,
+            CHAR_6102_UUID,
+            CHAR_FD04_UUID,
+            CHAR_6487_UUID,
+        )
+        if (uuid !in observedVendorNotifyChannels) return
 
         when (value[0].toInt() and 0xFF) {
             0xA1 -> {
@@ -1043,6 +1086,10 @@ class BleGattClient(private val context: Context) {
             appendLog("SYNC_DATA activity unverified raw=" + hex(value))
             return
         }
+
+        activityProbeResponseReceived = true
+        _activityProbeStatus.value =
+            "Verified 26 01 activity response • " + activity.steps + " steps • " + activity.calories + " kcal"
 
         val summary = DailyActivitySummary(
             epochMillis = System.currentTimeMillis(),
@@ -1581,7 +1628,7 @@ class BleGattClient(private val context: Context) {
         const val MAX_SPO2_HISTORY = 5_000
         const val KEY_SLEEP_HISTORY = "sleep_history"
         const val MAX_SLEEP_HISTORY = 2_000
-        const val SYNC_COMPLETE_DELAY_MS = 20_000L
+        const val SYNC_QUIET_AFTER_QUEUE_MS = 3_000L
         const val SYNC_START_DELAY_MS = 1_000L
         const val CAPTURE_RETENTION_MS = 24L * 60L * 60L * 1000L
         const val CAPTURE_PERSIST_DELAY_MS = 2_000L
@@ -1594,6 +1641,10 @@ class BleGattClient(private val context: Context) {
         const val CHAR_34F1_UUID = "000034f1-0000-1000-8000-00805f9b34fb"
         const val CHAR_34F2_UUID = "000034f2-0000-1000-8000-00805f9b34fb"
         const val CHAR_33F2_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
+        const val CHAR_6002_UUID = "00006002-0000-1000-8000-00805f9b34fb"
+        const val CHAR_6102_UUID = "00006102-0000-1000-8000-00805f9b34fb"
+        const val CHAR_FD04_UUID = "0000fd04-0000-1000-8000-00805f9b34fb"
+        const val CHAR_6487_UUID = "00006487-3c17-d293-8e48-14fe2e4da212"
         const val SPO2_SPOT_CHECK_UUID = "00002a5e-0000-1000-8000-00805f9b34fb"
         const val SPO2_CONTINUOUS_UUID = "00002a5f-0000-1000-8000-00805f9b34fb"
         const val SERVICE_CHANGED_UUID = "00002a05-0000-1000-8000-00805f9b34fb"
