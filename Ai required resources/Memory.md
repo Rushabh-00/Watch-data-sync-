@@ -24,6 +24,10 @@ It currently:
 - provides a polished product UI with Home, History, Watch and Diagnostics areas
 - shows health/fitness categories for heart rate, SpO2, steps, sleep, calories, workouts, activity and battery
 - keeps raw GATT data visible for protocol discovery
+- automatically remembers the selected FT_38093 watch and attempts to reconnect it on app start
+- scanner filters discovery to the target FT_38093/Fastrack watch instead of showing arbitrary BLE peripherals
+- excludes already-verified heart-rate packets from protocol-discovery capture while keeping live heart rate in the normal app UI
+- retains unknown/non-heart-rate captures locally for up to 24 hours for protocol investigation
 
 ## Evidence state
 
