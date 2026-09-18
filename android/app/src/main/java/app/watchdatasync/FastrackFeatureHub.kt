@@ -33,6 +33,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.watchdatasync.model.GattValue
+import app.watchdatasync.protocol.VendorHistoryProtocol
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -58,7 +61,7 @@ private val featureGroups = listOf(
         FeatureRow("Live heart rate", "Live E5 11 frames are decoded on the observed 33F2 channel.", FeatureState.VERIFIED),
         FeatureRow("Heart-rate history", "24-hour history fetch and persistence are working.", FeatureState.VERIFIED),
         FeatureRow("SpO₂ history", "34 FA history packets and completion are decoded.", FeatureState.VERIFIED),
-        FeatureRow("Sleep sync", "31 01 date/session markers are syncing; detailed 32 stages still need FT_38093 confirmation.", FeatureState.VERIFIED),
+        FeatureRow("Sleep sync", "31 01 session markers are syncing; the complete-sync capture also contains EC vendor timelines, but detailed sleep-stage semantics remain unverified.", FeatureState.VERIFIED),
         FeatureRow("Steps / calories / distance", "The current watch does not return the expected B2 activity stream yet; values must remain gated.", FeatureState.PENDING),
         FeatureRow("Stress", "UI capability is planned; no FT_38093 stress response is semantically verified.", FeatureState.PENDING),
         FeatureRow("Blood pressure", "Vendor apps expose this on some models, but this FT_38093 path has no verified mapping.", FeatureState.UNSUPPORTED),
@@ -94,6 +97,7 @@ private val featureGroups = listOf(
 @Composable
 fun FeatureHubScreen(viewModel: MainViewModel) {
     val context = LocalContext.current
+    val capturedValues by viewModel.values.collectAsStateWithLifecycle()
     var profileOpen by remember { mutableStateOf(false) }
     var goalsOpen by remember { mutableStateOf(false) }
     var notificationEnabled by remember { mutableStateOf(isNotificationAccessGranted(context)) }
@@ -276,6 +280,10 @@ fun FeatureHubScreen(viewModel: MainViewModel) {
             }
         }
 
+        item {
+            VendorHistoryEvidenceCard(capturedValues)
+        }
+
         featureGroups.forEach { (group, rows) ->
             item {
                 Text(
@@ -305,6 +313,92 @@ fun FeatureHubScreen(viewModel: MainViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun VendorHistoryEvidenceCard(values: List<GattValue>) {
+    val decoded = remember(values) {
+        values.mapNotNull { value ->
+            VendorHistoryProtocol.decode(value.hex)?.let { packet -> packet to value }
+        }
+    }
+    val ecMarkers = decoded.mapNotNull { (packet, _) ->
+        packet as? VendorHistoryProtocol.EcDateMarker
+    }
+    val ecRecords = decoded.sumOf { (packet, _) ->
+        (packet as? VendorHistoryProtocol.EcBatch)?.records?.size ?: 0
+    }
+    val faPages = decoded.mapNotNull { (packet, _) ->
+        packet as? VendorHistoryProtocol.FaPage
+    }
+    val faCompletions = decoded.count { (packet, _) ->
+        packet is VendorHistoryProtocol.FaCompletion
+    }
+    val transferCompletions = decoded.count { (packet, _) ->
+        packet is VendorHistoryProtocol.TransferCompletion
+    }
+    val sampleCount = faPages.sumOf { it.samples.size }
+    val latestPage = faPages.maxWithOrNull(
+        compareBy<VendorHistoryProtocol.FaPage> { it.year }
+            .thenBy { it.month }
+            .thenBy { it.day }
+            .thenBy { it.hour }
+            .thenBy { it.minute },
+    )
+    val latestMarker = ecMarkers.maxWithOrNull(
+        compareBy<VendorHistoryProtocol.EcDateMarker> { it.year }
+            .thenBy { it.month }
+            .thenBy { it.day },
+    )
+
+    Card {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Text(
+                "Observed vendor history",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "The complete-sync capture proves these packet structures exist on FT_38093. Their measurement meanings are intentionally not assigned until a watch-display correlation proves them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "EC timeline: ${ecMarkers.size} date markers • ${ecRecords} six-byte records",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "44 FA history: ${faPages.size} data pages • ${sampleCount} three-byte samples • ${faCompletions} transfer markers",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text(
+                "Final transfer marker: ${transferCompletions}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            latestMarker?.let {
+                Text(
+                    "Latest EC date marker: %04d-%02d-%02d • marker=0x%02X"
+                        .format(it.year, it.month, it.day, it.marker),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            latestPage?.let {
+                Text(
+                    "Latest 44 FA page: %04d-%02d-%02d %02d:%02d • 12 structural samples"
+                        .format(it.year, it.month, it.day, it.hour, it.minute),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                "Raw values remain available in Diagnostics and the rolling 24-hour capture.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
