@@ -109,7 +109,7 @@ private fun WatchDataSyncApp(viewModel: MainViewModel) {
                 .padding(padding),
         ) {
             when (selectedTab) {
-                AppTab.HOME -> HomeScreen(viewModel)
+                AppTab.HOME -> ProfessionalDashboardScreen(viewModel)
                 AppTab.HISTORY -> HistoryScreen(viewModel)
                 AppTab.WATCH -> WatchScreen(viewModel)
                 AppTab.FEATURES -> FeatureHubScreen(viewModel)
