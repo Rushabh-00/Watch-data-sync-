@@ -185,3 +185,13 @@ Current goal for the next continuation:
 - Current verified FT_38093 data path remains live HR, HR history, SpO2 history, battery and time synchronization. Sleep session markers sync; detailed activity/steps/calories/distance, stress, multisport/workout, notification delivery, contacts/call/SMS, weather transfer, media/camera control, alarms, DND/display settings, Health Connect/Google Fit writes and OTA remain capability-gated pending direct FT_38093 evidence.
 - Public Fastrack/Titan companion-app and manual research is being used only to define the feature surface; it is not treated as proof of FT_38093 packet semantics.
 - Latest release before this feature pass: v0.3.9, built successfully in Actions run #223.
+
+
+## FT_38093 complete-sync vendor history structure pass — 2026-09-19 continuation
+
+- The supplied `new .log2.txt` is a complete connection -> full sync -> disconnect capture and contains 98 non-heart-rate packets from the session.
+- Repeatable structural evidence in that complete sync includes EC 01 dated markers, EC 02 batches made of six-byte records, 44 FA history pages with 12 three-byte samples per 44-byte page, 44 FA FD transfer markers, and a final 52 00 FD marker.
+- The EC and 44 FA record/value fields are not semantically identified. The app now decodes and surfaces their observed framing, timestamps and record/sample counts while retaining raw bytes in Diagnostics. No new outbound command is sent for these packets because the capture does not establish a safe one-to-one request mapping.
+- 44 FA is treated as a vendor-history structure, not labeled as sleep, stress, steps, workout or another health metric. EC records are likewise kept semantically neutral.
+- This continuation keeps the verified FT_38093 paths unchanged: live heart rate, heart-rate history, SpO2 history, watch-specific battery and time synchronization. B2 step history, calories, distance and detailed sleep-stage semantics remain gated until a direct repeatable FT_38093 correlation exists.
+- v0.4.1 packages this evidence-backed structural decoder and the Smart Features evidence surface.
