@@ -1058,6 +1058,7 @@ private fun normalizeMetricLabel(value: String): String =
         .replace("bpm", "bpm", ignoreCase = true)
         .trim()
 
+private const val UUID_BATTERY = "00002a19-0000-1000-8000-00805f9b34fb"
 private const val UUID_HEART_RATE = "00002a37-0000-1000-8000-00805f9b34fb"
 private const val UUID_VENDOR_HEART_RATE = "000033f2-0000-1000-8000-00805f9b34fb"
 private const val UUID_SPO2 = "00002a5f-0000-1000-8000-00805f9b34fb"
