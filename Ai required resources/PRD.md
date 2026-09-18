@@ -2,30 +2,56 @@
 
 ## Product goal
 
-Create an Android application that can communicate with compatible Fastrack/Titan smartwatches directly over BLE and synchronize watch-owned fitness/health records without requiring the vendor companion app for normal data access.
+Create a professional Android companion app for the exact observed Fastrack FT_38093 firmware that communicates directly over BLE, syncs verified watch-owned wellness data locally and provides an evidence-driven path to the broader companion-app feature surface.
 
-## MVP
+## Core principles
 
-1. BLE scan and watch identification
-2. GATT service/characteristic discovery
-3. Packet/event capture
-4. Model-specific protocol adapter
-5. Read-only historical data synchronization
-6. Local persistence
-7. Export/integration layer
+- Direct BLE; no Android OS pairing requirement for the app workflow.
+- Model-specific adapter.
+- Raw packets are captured before interpretation.
+- No guessed UUIDs, writes, checksums or field meanings.
+- Unknown data stays visible without fake semantics.
+- Metrics are wellness data, not medical measurements.
+- Sync is retry-safe and idempotent.
+- Sensitive permissions are isolated to the distribution that actually needs them.
 
-## Non-goals for the first build
+## Verified product capability
 
+- connect/reconnect
+- live heart rate
+- heart-rate history
+- SpO2 history
+- watch battery
+- time synchronization
+- sleep session markers
+- EC vendor-history structure
+- 44 FA vendor-history structure
+- diagnostics/export
+- professional dashboard
+- local profile/goals
+- phone-side utility surface
+- safe sideload distribution
+
+## Broader companion feature target
+
+The public Fastrack Smart World surface establishes the desired companion coverage:
+- fitness/multi-sport/sleep
+- notifications
+- contacts
+- calls/SMS
+- Google Fit
+- weather
+- watch settings
+- watch faces
 - firmware updates
-- watch-face installation
-- undocumented configuration writes
-- copying proprietary cloud/account services
-- assuming one protocol works for every Fastrack model
 
-## Success criterion
+These are product targets only. FT_38093 watch-side commands must still be independently verified.
 
-Given one selected compatible watch model, the app can connect, request history, decode at least one supported data class, persist it locally, and repeat synchronization without the vendor app.
+## Safety boundary
 
-## Current status
-
-MVP phase 1: BLE/GATT discovery.
+The project will not:
+- send undocumented configuration writes
+- install watch faces without a verified transfer
+- perform OTA/DFU without a model-specific safe procedure
+- expose candidate values as authoritative Today data
+- ship sensitive identifiers in logs/source
