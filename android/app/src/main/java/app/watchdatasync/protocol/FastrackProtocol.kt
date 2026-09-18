@@ -95,11 +95,18 @@ class FastrackProtocol : WatchProtocol {
                 settleDelayMs = 600L,
             ),
             Command(
-                label = "Sync today's activity",
+                label = "Sync step history",
                 characteristicUuid = CHAR_33F1_UUID,
-                payload = hex("26 01"),
+                payload = hex("B2 FA"),
                 writeWithoutResponse = false,
-                settleDelayMs = 900L,
+                settleDelayMs = 1_000L,
+            ),
+            Command(
+                label = "Sync sleep history",
+                characteristicUuid = CHAR_33F1_UUID,
+                payload = hex("31 01"),
+                writeWithoutResponse = false,
+                settleDelayMs = 1_000L,
             ),
             Command(
                 label = "Sync heart-rate history",
@@ -113,13 +120,6 @@ class FastrackProtocol : WatchProtocol {
                 characteristicUuid = CHAR_34F1_UUID,
                 payload = hex("34 FA"),
                 writeWithoutResponse = true,
-                settleDelayMs = 1_000L,
-            ),
-            Command(
-                label = "Sync step history",
-                characteristicUuid = CHAR_33F1_UUID,
-                payload = hex("B2 FA"),
-                writeWithoutResponse = false,
                 settleDelayMs = 1_000L,
             ),
         )
