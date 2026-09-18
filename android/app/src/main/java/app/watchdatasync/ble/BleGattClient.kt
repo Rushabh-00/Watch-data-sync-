@@ -8,6 +8,8 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 import android.os.Handler
 import android.os.Looper
 import app.watchdatasync.model.GattCharacteristic
@@ -32,8 +34,13 @@ class BleGattClient(private val context: Context) {
     private val fastrackProtocol = FastrackProtocol()
 
     private val handler = Handler(Looper.getMainLooper())
+    private val capturePrefs = context.getSharedPreferences(
+        CAPTURE_PREFS,
+        Context.MODE_PRIVATE,
+    )
     private var operationTimeout: Runnable? = null
     private var reconnectRunnable: Runnable? = null
+    private var capturePersistRunnable: Runnable? = null
 
     private sealed interface GattOperation {
         data class Read(
@@ -62,11 +69,18 @@ class BleGattClient(private val context: Context) {
     private val _values = MutableStateFlow<List<GattValue>>(emptyList())
     val values: StateFlow<List<GattValue>> = _values.asStateFlow()
 
+    private val _liveHeartRate = MutableStateFlow<Int?>(null)
+    val liveHeartRate: StateFlow<Int?> = _liveHeartRate.asStateFlow()
+
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    init {
+        _values.value = loadPersistedCapture()
+    }
 
     @SuppressLint("MissingPermission")
     fun connect(device: BluetoothDevice) {
@@ -78,7 +92,6 @@ class BleGattClient(private val context: Context) {
         lastDevice = device
         _error.value = null
         _services.value = emptyList()
-        _values.value = emptyList()
         clearOperationQueue()
 
         openGatt(device, reconnect = false)
@@ -140,7 +153,6 @@ class BleGattClient(private val context: Context) {
 
         _connected.value = false
         _services.value = emptyList()
-        _values.value = emptyList()
         matchedVendorProtocol = false
     }
 
@@ -506,7 +518,6 @@ class BleGattClient(private val context: Context) {
             disconnectRequested = false
             _connected.value = false
             _services.value = emptyList()
-            _values.value = emptyList()
             clearOperationQueue()
             runCatching { gatt.close() }
 
@@ -760,8 +771,9 @@ class BleGattClient(private val context: Context) {
             service.characteristics.any { it.uuid == characteristic.uuid }
         }?.uuid?.toString() ?: "unknown"
 
-        val decoded = decodeStandardValue(characteristic.uuid, value)
-            ?: if (matchedVendorProtocol) {
+        val standardDecoded = decodeStandardValue(characteristic.uuid, value)
+        val vendorDecoded =
+            if (matchedVendorProtocol) {
                 fastrackProtocol.decode(
                     characteristicUuid = characteristic.uuid.toString(),
                     packet = value,
@@ -769,7 +781,13 @@ class BleGattClient(private val context: Context) {
             } else {
                 null
             }
-            ?: diagnosticByteSummary(value)
+
+        val decoded = standardDecoded ?: vendorDecoded
+
+        if (isHeartRatePacket(characteristic.uuid, value, decoded)) {
+            _liveHeartRate.value = extractHeartRate(decoded)
+            return
+        }
 
         val item = GattValue(
             serviceUuid = serviceUuid,
@@ -777,16 +795,101 @@ class BleGattClient(private val context: Context) {
             timestamp = timestamp(),
             hex = hex(value),
             ascii = ascii(value),
-            decoded = decoded,
+            decoded = decoded ?: diagnosticByteSummary(value),
         )
 
-        _values.value = (_values.value + item).takeLast(5_000)
+        _values.value = (_values.value + item)
+            .filter { it.capturedAt >= System.currentTimeMillis() - CAPTURE_RETENTION_MS }
+            .takeLast(MAX_CAPTURE_VALUES)
 
+        schedulePersistCapture()
         appendLog(
             source + " " + characteristic.uuid +
                 " value=" + item.hex +
                 (item.decoded?.let { " decoded=" + it } ?: ""),
         )
+    }
+
+    private fun isHeartRatePacket(
+        characteristic: BluetoothGattCharacteristic,
+        value: ByteArray,
+        decoded: String?,
+    ): Boolean {
+        val uuid = characteristic.uuid.toString().lowercase(Locale.ROOT)
+        if (uuid == HEART_RATE_MEASUREMENT_UUID) return true
+
+        return uuid == VENDOR_HEART_RATE_UUID &&
+            value.size >= 3 &&
+            (value[0].toInt() and 0xFF) == 0xE5 &&
+            (value[1].toInt() and 0xFF) == 0x11 &&
+            (value[2].toInt() and 0xFF) == 0x00
+    }
+
+    private fun extractHeartRate(decoded: String?): Int? =
+        Regex("Heart rate (\\d+) bpm")
+            .find(decoded.orEmpty())
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+
+    private fun schedulePersistCapture() {
+        capturePersistRunnable?.let(handler::removeCallbacks)
+        val runnable = Runnable { persistCapture() }
+        capturePersistRunnable = runnable
+        handler.postDelayed(runnable, CAPTURE_PERSIST_DELAY_MS)
+    }
+
+    private fun persistCapture() {
+        capturePersistRunnable = null
+        val cutoff = System.currentTimeMillis() - CAPTURE_RETENTION_MS
+        val current = _values.value
+            .filter { it.capturedAt >= cutoff }
+            .takeLast(MAX_CAPTURE_VALUES)
+
+        val array = JSONArray()
+        current.forEach { value ->
+            array.put(
+                JSONObject().apply {
+                    put("service", value.serviceUuid)
+                    put("characteristic", value.characteristicUuid)
+                    put("timestamp", value.timestamp)
+                    put("hex", value.hex)
+                    put("ascii", value.ascii)
+                    put("decoded", value.decoded)
+                    put("capturedAt", value.capturedAt)
+                },
+            )
+        }
+
+        capturePrefs.edit()
+            .putString(CAPTURE_KEY, array.toString())
+            .apply()
+    }
+
+    private fun loadPersistedCapture(): List<GattValue> {
+        val cutoff = System.currentTimeMillis() - CAPTURE_RETENTION_MS
+        val raw = capturePrefs.getString(CAPTURE_KEY, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val objectValue = array.getJSONObject(index)
+                    val capturedAt = objectValue.optLong("capturedAt", 0L)
+                    if (capturedAt < cutoff) continue
+                    add(
+                        GattValue(
+                            serviceUuid = objectValue.optString("service"),
+                            characteristicUuid = objectValue.optString("characteristic"),
+                            timestamp = objectValue.optString("timestamp"),
+                            hex = objectValue.optString("hex"),
+                            ascii = objectValue.optString("ascii"),
+                            decoded = objectValue.optString("decoded").takeIf { it != "null" },
+                            capturedAt = capturedAt,
+                        ),
+                    )
+                }
+            }.takeLast(MAX_CAPTURE_VALUES)
+        }.getOrDefault(emptyList())
     }
 
     private fun diagnosticByteSummary(value: ByteArray): String {
@@ -1027,8 +1130,11 @@ class BleGattClient(private val context: Context) {
     }
 
     fun clearCapture() {
+        capturePersistRunnable?.let(handler::removeCallbacks)
+        capturePersistRunnable = null
         _values.value = emptyList()
         _logs.value = emptyList()
+        capturePrefs.edit().remove(CAPTURE_KEY).apply()
     }
 
     private fun appendLog(line: String) {
