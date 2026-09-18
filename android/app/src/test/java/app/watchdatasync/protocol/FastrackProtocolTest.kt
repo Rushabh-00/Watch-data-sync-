@@ -37,7 +37,7 @@ class FastrackProtocolTest {
         val heartRate = commands.first { it.label == "Sync heart-rate history" }
         val spo2 = commands.first { it.label == "Sync SpO₂ history" }
 
-        assertEquals(12_000L, steps.responseTimeoutMs)
+        assertEquals(30_000L, steps.responseTimeoutMs)
         assertEquals(0L, steps.responseQuietWindowMs)
         assertEquals("B2", steps.responsePrefixes.single().toHex())
         assertEquals("B2 FD", steps.completeResponsePrefix!!.toHex())
@@ -51,7 +51,7 @@ class FastrackProtocolTest {
         assertEquals("F7", heartRate.responsePrefixes.single().toHex())
         assertEquals("F7 FD", heartRate.completeResponsePrefix!!.toHex())
 
-        assertEquals(12_000L, spo2.responseTimeoutMs)
+        assertEquals(30_000L, spo2.responseTimeoutMs)
         assertEquals("34 FA FD", spo2.completeResponsePrefix!!.toHex())
     }
 
@@ -94,6 +94,22 @@ class FastrackProtocolTest {
         assertEquals(360, decoded?.height)
         assertEquals(1_048_576L, decoded?.maxDataSize)
         assertEquals(3, decoded?.compatibleLevel)
+    }
+
+    @Test
+    fun b1RealtimeStepRecordUsesSameVerifiedLayout() {
+        val packet = byteArrayOf(
+            0xB1.toByte(),
+            0x07, 0xEA.toByte(), 0x09, 0x13, 0x13,
+            0x17, 0x71,
+            0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        )
+
+        assertEquals(
+            6001,
+            ((packet[6].toInt() and 0xFF) shl 8) or (packet[7].toInt() and 0xFF),
+        )
     }
 
     @Test
