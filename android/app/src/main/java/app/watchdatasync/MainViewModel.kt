@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
-import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import app.watchdatasync.ble.BleGattClient
 import app.watchdatasync.ble.BleScanner
@@ -18,6 +17,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val devices: StateFlow<List<WatchDevice>> = scanner.devices
     val connected = gattClient.connected
     val services = gattClient.services
+    val values = gattClient.values
     val logs = gattClient.logs
     val error = gattClient.error
 
@@ -52,6 +52,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             gattClient.reportError("Connection failed: " + (e.message ?: e.javaClass.simpleName))
         }
     }
+
+    fun readCharacteristic(serviceUuid: String, characteristicUuid: String): Boolean =
+        gattClient.readCharacteristic(serviceUuid, characteristicUuid)
+
+    fun enableNotifications(serviceUuid: String, characteristicUuid: String): Boolean =
+        gattClient.enableNotifications(serviceUuid, characteristicUuid)
+
+    fun refreshStandardData() = gattClient.refreshStandardData()
 
     fun clearError() = gattClient.clearError()
 
