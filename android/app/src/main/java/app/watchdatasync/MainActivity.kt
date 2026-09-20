@@ -40,7 +40,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -104,21 +103,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             val snapshot by LiveHeartRateState.snapshot.collectAsStateWithLifecycle()
             val devices by controller.devices.collectAsStateWithLifecycle()
+            var themeMode by remember { mutableStateOf(loadThemeMode()) }
 
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(0xFF64E9FF),
-                    secondary = Color(0xFFA58BFF),
-                    background = Color(0xFF050811),
-                    surface = Color(0xFF10182A),
-                    surfaceVariant = Color(0xFF172238),
-                ),
-            ) {
+            WatchDataSyncTheme(themeMode) {
                 Surface(Modifier.fillMaxSize()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF050811)),
+                            .background(MaterialTheme.colorScheme.background),
                     ) {
                         Dashboard(
                             snapshot = snapshot,
@@ -165,6 +157,11 @@ class MainActivity : ComponentActivity() {
                                     this@MainActivity,
                                     it,
                                 )
+                            },
+                            currentThemeMode = themeMode,
+                            onThemeMode = {
+                                themeMode = it
+                                saveThemeMode(it)
                             },
                             onMonitoringEnabled = {
                                 LiveHeartRateState.set(
@@ -243,6 +240,24 @@ class MainActivity : ComponentActivity() {
         return result.toTypedArray()
     }
 
+    private fun loadThemeMode(): ThemeMode =
+        ThemeMode.fromKey(
+            getSharedPreferences(
+                HeartRateService.PREFS,
+                MODE_PRIVATE,
+            ).getString(
+                KEY_THEME_MODE,
+                ThemeMode.AUTO.key,
+            ),
+        )
+
+    private fun saveThemeMode(mode: ThemeMode) {
+        getSharedPreferences(
+            HeartRateService.PREFS,
+            MODE_PRIVATE,
+        ).edit().putString(KEY_THEME_MODE, mode.key).apply()
+    }
+
     private fun monitoringEnabled(): Boolean =
         getSharedPreferences(
             HeartRateService.PREFS,
@@ -251,6 +266,10 @@ class MainActivity : ComponentActivity() {
             HeartRateService.KEY_NOTIFICATION_ENABLED,
             true,
         )
+
+    companion object {
+        private const val KEY_THEME_MODE = "theme_mode"
+    }
 
     private fun refreshDiscovery(force: Boolean = false) {
         val savedAddress = getSharedPreferences(
@@ -268,6 +287,8 @@ class MainActivity : ComponentActivity() {
 private fun Dashboard(
     snapshot: LiveHeartRateSnapshot,
     devices: List<FoundWatch>,
+    currentThemeMode: ThemeMode,
+    onThemeMode: (ThemeMode) -> Unit,
     onScan: () -> Unit,
     onConnect: (FoundWatch) -> Unit,
     onDisconnect: () -> Unit,
@@ -330,7 +351,7 @@ private fun Dashboard(
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF10182A),
+                containerColor = MaterialTheme.colorScheme.surface,
             ),
         ) {
             Column(
@@ -669,6 +690,49 @@ private fun Dashboard(
             }
         }
 
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = connectedShape,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("APPEARANCE", fontWeight = FontWeight.Bold)
+                Text(
+                    "Auto follows the phone theme. OLED uses pure black for OLED displays.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    ThemeMode.entries.forEach { option ->
+                        if (option == currentThemeMode) {
+                            Button(
+                                onClick = { onThemeMode(option) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(option.label)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { onThemeMode(option) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(option.label)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Text(
             "Time is synchronized automatically after the live-HR channel connects.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -692,7 +756,7 @@ private fun StatPill(
         modifier = Modifier
             .border(
                 1.dp,
-                Color(0xFF243A56),
+                MaterialTheme.colorScheme.outline,
                 RoundedCornerShape(14.dp),
             )
             .padding(
@@ -704,7 +768,7 @@ private fun StatPill(
             Text(
                 label,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF7F8EA7),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 value?.toString() ?: "—",
@@ -789,7 +853,7 @@ private fun HeartGraph(
 
         drawPath(
             path = path,
-            color = Color(0xFF64E9FF),
+            color = MaterialTheme.colorScheme.primary,
             style = Stroke(width = 4f),
         )
 
