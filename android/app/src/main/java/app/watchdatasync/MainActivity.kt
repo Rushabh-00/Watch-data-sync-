@@ -751,9 +751,10 @@ private fun HeartGraph(
                     val targetTime =
                         minTime +
                             (
-                                (tap.x / size.width.coerceAtLeast(1f))
-                                    .coerceIn(0f, 1f) * timeRange
-                                ).toLong()
+                                (
+                                    (tap.x / size.width.coerceAtLeast(1f))
+                                        .coerceIn(0f, 1f) * timeRange.toFloat()
+                                    ).toLong()
 
                     points.minByOrNull {
                         abs(it.timestamp - targetTime)
