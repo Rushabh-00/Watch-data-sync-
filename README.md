@@ -6,6 +6,7 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 
 - Saved FT_38093 device with automatic reconnect.
 - Automatic time sync after the live-heart-rate channel is enabled.
+- Watch battery read using the verified A2 command, refreshed automatically while connected.
 - Background BLE monitoring through a connected-device foreground service.
 - Notification status-bar icon that renders the current BPM.
 - Current BPM, average, minimum and maximum.
