@@ -96,7 +96,9 @@ class HeartRateService : Service() {
                 val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
                 prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
                 publishNotificationState()
-                updateNotification(force = true)
+                if (runningForeground) {
+                    startForegroundCompat(buildNotification())
+                }
             }
 
             ACTION_SET_MONITORING -> {
@@ -105,6 +107,7 @@ class HeartRateService : Service() {
                 publishMonitoringState()
                 if (enabled) {
                     if (!runningForeground) startForegroundCompat(buildNotification())
+                    loadOverlayFromPrefs()
                     startWatchdog()
                     connectSavedDevice()
                 } else {
@@ -732,7 +735,7 @@ class HeartRateService : Service() {
     private fun updateStatus(value: String) {
         val current = LiveHeartRateState.snapshot.value
         LiveHeartRateState.set(current.copy(status = value))
-        updateNotification(force = true)
+        updateNotification(force = notificationEnabled())
     }
 
     private fun saveDevice(address: String, name: String?) {
@@ -1117,7 +1120,6 @@ class HeartRateService : Service() {
                 connected = false,
                 status = "Monitoring off",
                 backgroundMonitoringEnabled = false,
-                overlayVisible = false,
             ),
         )
         stopSelf()
