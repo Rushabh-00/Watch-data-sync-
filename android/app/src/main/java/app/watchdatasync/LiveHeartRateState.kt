@@ -22,6 +22,7 @@ data class LiveHeartRateSnapshot(
     val overlayLocked: Boolean = false,
     val overlayScale: Float = 1f,
     val notificationEnabled: Boolean = true,
+    val keepLiveHrWhenScreenOff: Boolean = true,
 )
 
 object LiveHeartRateState {
