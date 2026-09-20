@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.horizontalScroll
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -54,6 +55,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.text.SimpleDateFormat
@@ -327,7 +329,7 @@ private fun Dashboard(
         }
     }
 
-    val connectedShape = RoundedCornerShape(26.dp)
+    val connectedShape = RoundedCornerShape(22.dp)
 
     Column(
         modifier = Modifier
@@ -395,7 +397,10 @@ private fun Dashboard(
                         )
                     }
 
-                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                    Column(
+                        horizontalAlignment = androidx.compose.ui.Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         Text(
                             if (snapshot.connected) "● LIVE" else "○ OFFLINE",
                             color = if (snapshot.connected) {
@@ -408,7 +413,20 @@ private fun Dashboard(
                         Text(
                             snapshot.deviceName ?: "No saved watch",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
                         )
+                        snapshot.batteryPercent?.let { percent ->
+                            val batteryText = buildString {
+                                append("Battery ").append(percent).append("%")
+                                if (snapshot.batteryCharging == true) append(" • Charging")
+                            }
+                            Text(
+                                batteryText,
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
 
@@ -476,7 +494,9 @@ private fun Dashboard(
                 )
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     GraphWindow.entries.forEach { option ->
@@ -487,9 +507,14 @@ private fun Dashboard(
                                     graphWindow = option
                                     selectedPoint = null
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.width(56.dp),
                             ) {
-                                Text(option.label)
+                                Text(
+                                    option.label,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    fontSize = 12.sp,
+                                )
                             }
                         } else {
                             OutlinedButton(
@@ -497,9 +522,14 @@ private fun Dashboard(
                                     graphWindow = option
                                     selectedPoint = null
                                 },
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.width(56.dp),
                             ) {
-                                Text(option.label)
+                                Text(
+                                    option.label,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    fontSize = 12.sp,
+                                )
                             }
                         }
                     }
@@ -509,6 +539,8 @@ private fun Dashboard(
                     "Tap the graph to inspect a sample • RAM-only history",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }
@@ -531,16 +563,32 @@ private fun Dashboard(
                     fontWeight = FontWeight.Bold,
                 )
 
-                Text(snapshot.deviceName ?: "No saved watch")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(snapshot.deviceName ?: "No saved watch")
+                        Text(
+                            when {
+                                snapshot.connected -> "Connected in background"
+                                snapshot.deviceName != null -> "Saved watch • auto-connect enabled"
+                                else -> "No saved watch"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
 
-                Text(
-                    when {
-                        snapshot.connected -> "Connected in background"
-                        snapshot.deviceName != null -> "Saved watch • auto-connect enabled"
-                        else -> "No saved watch"
-                    },
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                    snapshot.batteryPercent?.let { percent ->
+                        Text(
+                            "BATTERY $percent%",
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
@@ -824,7 +872,7 @@ private fun HeartGraph(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(170.dp),
+                .height(150.dp),
         ) {
             Text(
                 "Waiting for heart-rate samples…",
@@ -848,7 +896,7 @@ private fun HeartGraph(
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
-            .height(170.dp)
+            .height(150.dp)
             .pointerInput(points) {
                 detectTapGestures { tap ->
                     val ratio =
