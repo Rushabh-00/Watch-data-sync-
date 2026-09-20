@@ -331,7 +331,7 @@ private fun Dashboard(
                 Text(
                     "WATCH DATA SYNC",
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = graphColor,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(4.dp))
@@ -805,6 +805,9 @@ private fun HeartGraph(
     val minValue = (points.minOf { it.bpm } - 4).coerceAtLeast(20)
     val maxValue = (points.maxOf { it.bpm } + 4).coerceAtMost(220)
     val valueRange = (maxValue - minValue).coerceAtLeast(1)
+    val graphColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val selectedColor = MaterialTheme.colorScheme.onSurface
 
     Canvas(
         modifier = Modifier
@@ -845,7 +848,7 @@ private fun HeartGraph(
         }
 
         drawLine(
-            color = MaterialTheme.colorScheme.outlineVariant,
+            color = gridColor,
             start = Offset(0f, size.height - 1f),
             end = Offset(size.width, size.height - 1f),
             strokeWidth = 2f,
