@@ -376,7 +376,6 @@ class HeartRateService : Service() {
                             LiveHeartRateState.set(
                                 snapshot.copy(
                                     connected = false,
-                                    timeSynced = false,
                                 ),
                             )
                             closeGatt()
@@ -745,7 +744,6 @@ class HeartRateService : Service() {
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
                 connected = false,
-                timeSynced = false,
                 status = "Disconnected",
             ),
         )
