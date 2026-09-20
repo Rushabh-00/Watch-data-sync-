@@ -33,6 +33,30 @@ class FastrackProtocolTest {
     }
 
     @Test
+    fun batteryRequestUsesVerifiedA2Opcode() {
+        assertArrayEquals(
+            byteArrayOf(0xA2.toByte()),
+            FastrackProtocol.buildBatteryRequestPacket(),
+        )
+        assertEquals(
+            WatchBattery(32, false),
+            FastrackProtocol.decodeBattery(byteArrayOf(0xA2.toByte(), 32, 0x00)),
+        )
+        assertEquals(
+            WatchBattery(95, true),
+            FastrackProtocol.decodeBattery(byteArrayOf(0xA2.toByte(), 95, 0x01)),
+        )
+    }
+
+    @Test
+    fun invalidBatteryFrameIsIgnored() {
+        assertEquals(
+            null,
+            FastrackProtocol.decodeBattery(byteArrayOf(0xA2.toByte(), 101)),
+        )
+    }
+
+    @Test
     fun liveHeartRateFrameUsesObservedE51100Layout() {
         assertEquals(
             104,
