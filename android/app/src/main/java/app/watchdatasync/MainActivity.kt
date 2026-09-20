@@ -813,7 +813,7 @@ private fun HeartGraph(
             .pointerInput(points) {
                 detectTapGestures { tap ->
                     val ratio =
-                        (tap.x / size.width.coerceAtLeast(1f))
+                        (tap.x / size.width.toFloat().coerceAtLeast(1f))
                             .coerceIn(0f, 1f)
                     val targetTime =
                         minTime + (ratio * timeRange.toFloat()).toLong()
