@@ -15,7 +15,6 @@ data class LiveHeartRateSnapshot(
     val maximumBpm: Int? = null,
     val graph: List<HeartRatePoint> = emptyList(),
     val connected: Boolean = false,
-    val timeSynced: Boolean = false,
     val deviceName: String? = null,
     val status: String = "Ready",
     val overlayVisible: Boolean = false,
