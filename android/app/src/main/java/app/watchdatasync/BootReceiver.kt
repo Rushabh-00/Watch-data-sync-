@@ -22,10 +22,24 @@ class BootReceiver : BroadcastReceiver() {
             .getString(HeartRateService.KEY_ADDRESS, null)
             .isNullOrBlank()
 
-        val enabled = prefs.getBoolean(
-            HeartRateService.KEY_NOTIFICATION_ENABLED,
-            true,
-        )
+        val enabled = if (prefs.contains(HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED)) {
+            prefs.getBoolean(
+                HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED,
+                true,
+            )
+        } else {
+            val legacy = prefs.getBoolean(
+                HeartRateService.KEY_NOTIFICATION_ENABLED,
+                true,
+            )
+            prefs.edit()
+                .putBoolean(
+                    HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED,
+                    legacy,
+                )
+                .apply()
+            legacy
+        }
 
         if (savedWatch && enabled) {
             HeartRateService.start(context)
