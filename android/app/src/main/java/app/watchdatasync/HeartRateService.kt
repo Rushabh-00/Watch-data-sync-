@@ -793,20 +793,25 @@ class HeartRateService : Service() {
 
     private fun buildNotification(): Notification {
         val snapshot = LiveHeartRateState.snapshot.value
+        val notificationsOn = notificationEnabled()
         val bpmText = snapshot.bpm?.let { "$it bpm" } ?: "No HR yet"
 
-        val stats = buildString {
-            snapshot.averageBpm?.let { append("Avg ").append(it).append(" • ") }
-            snapshot.minimumBpm?.let { append("Min ").append(it).append(" • ") }
-            snapshot.maximumBpm?.let { append("Max ").append(it) }
+        val stats = if (!notificationsOn) {
+            "Background watch connection active"
+        } else {
+            buildString {
+                snapshot.averageBpm?.let { append("Avg ").append(it).append(" • ") }
+                snapshot.minimumBpm?.let { append("Min ").append(it).append(" • ") }
+                snapshot.maximumBpm?.let { append("Max ").append(it) }
 
-            snapshot.batteryPercent?.let {
-                if (isNotEmpty()) append(" • ")
-                append("Battery ").append(it).append("%")
-                if (snapshot.batteryCharging == true) append(" • Charging")
+                snapshot.batteryPercent?.let {
+                    if (isNotEmpty()) append(" • ")
+                    append("Battery ").append(it).append("%")
+                    if (snapshot.batteryCharging == true) append(" • Charging")
+                }
+
+                if (isEmpty()) append(snapshot.status)
             }
-
-            if (isEmpty()) append(snapshot.status)
         }
 
         val openIntent = PendingIntent.getActivity(
@@ -816,9 +821,12 @@ class HeartRateService : Service() {
             pendingIntentFlags(),
         )
 
-        val builder = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(renderNotificationIcon(snapshot.bpm))
-            .setContentTitle(bpmText)
+        val builder = Notification.Builder(
+            this,
+            if (notificationsOn) CHANNEL_ID else QUIET_CHANNEL_ID,
+        )
+            .setSmallIcon(renderNotificationIcon(if (notificationsOn) snapshot.bpm else null))
+            .setContentTitle(if (notificationsOn) bpmText else "Watch connected")
             .setContentText(stats)
             .setContentIntent(openIntent)
             .setOngoing(true)
@@ -866,6 +874,7 @@ class HeartRateService : Service() {
 
     private fun updateNotification(force: Boolean = false) {
         if (!runningForeground || !monitoringEnabled()) return
+        if (!notificationEnabled() && !force) return
 
         val snapshot = LiveHeartRateState.snapshot.value
         val now = System.currentTimeMillis()
@@ -884,8 +893,15 @@ class HeartRateService : Service() {
 
     private fun startForegroundCompat(notification: Notification) {
         if (runningForeground) {
-            getSystemService(NotificationManager::class.java)
-                .notify(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
             return
         }
 
