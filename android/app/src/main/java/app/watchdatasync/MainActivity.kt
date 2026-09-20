@@ -646,7 +646,7 @@ private fun Dashboard(
                 )
 
                 Text(
-                    "Floating BPM pill with persistent position and optional lock.",
+                    "Floating BPM pill. Hide only removes the overlay; it does not disconnect the watch or stop the notification.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
@@ -729,7 +729,7 @@ private fun Dashboard(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "The ongoing notification keeps the BLE foreground service alive. Turning it off also stops background live HR.",
+                            "Turning this off disconnects the watch and stops background BLE monitoring.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
