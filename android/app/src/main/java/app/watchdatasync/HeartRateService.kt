@@ -45,6 +45,8 @@ class HeartRateService : Service() {
     private var streamRecoveryAttempts = 0
     private var lastNotificationAt = 0L
     private var lastNotifiedBpm: Int? = null
+    private var cachedNotificationBpm: Int? = Int.MIN_VALUE
+    private var cachedNotificationIcon: Icon? = null
     private var batteryRefreshRunnable: Runnable? = null
     private var pendingTimeSyncWrite = false
     private var timeSyncRequested = false
@@ -817,6 +819,10 @@ class HeartRateService : Service() {
     private var runningForeground = false
 
     private fun renderNotificationIcon(bpm: Int?): Icon {
+        if (cachedNotificationBpm == bpm && cachedNotificationIcon != null) {
+            return cachedNotificationIcon!!
+        }
+
         val density = resources.displayMetrics.density
         val size = (48f * density).toInt().coerceAtLeast(48)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
@@ -837,7 +843,11 @@ class HeartRateService : Service() {
         }
 
         canvas.drawText(value, size / 2f, size * 0.64f, paint)
-        return Icon.createWithBitmap(bitmap)
+
+        return Icon.createWithBitmap(bitmap).also {
+            cachedNotificationBpm = bpm
+            cachedNotificationIcon = it
+        }
     }
 
     private fun updateNotification(force: Boolean = false) {
