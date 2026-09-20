@@ -13,6 +13,7 @@ android {
         targetSdk = 37
         versionCode = 3
         versionName = "1.2.0"
+        resourceConfigurations += setOf("en")
     }
 
     buildFeatures {
