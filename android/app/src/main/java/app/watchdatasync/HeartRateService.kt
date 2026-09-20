@@ -424,7 +424,6 @@ class HeartRateService : Service() {
             LiveHeartRateState.set(
                 LiveHeartRateState.snapshot.value.copy(
                     connected = false,
-                    timeSynced = false,
                     status = "Disconnected • reconnecting…",
                 ),
             )
@@ -1050,7 +1049,6 @@ class HeartRateService : Service() {
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
                 connected = false,
-                timeSynced = false,
                 status = "Monitoring off",
                 notificationEnabled = false,
                 overlayVisible = false,
