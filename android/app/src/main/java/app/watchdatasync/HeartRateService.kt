@@ -45,6 +45,8 @@ class HeartRateService : Service() {
     private var streamRecoveryAttempts = 0
     private var lastNotificationAt = 0L
     private var lastNotifiedBpm: Int? = null
+    private var batteryRefreshRunnable: Runnable? = null
+    private var pendingTimeSyncWrite = false
 
     private var graphPoints = ArrayList<HeartRatePoint>()
     private var sampleCount = 0L
@@ -486,7 +488,7 @@ class HeartRateService : Service() {
             characteristic: android.bluetooth.BluetoothGattCharacteristic,
         ) {
             if (gatt !== current) return
-            handleHeartRate(characteristic.value)
+            handleWatchData(characteristic.value)
         }
 
         override fun onCharacteristicChanged(
@@ -495,7 +497,7 @@ class HeartRateService : Service() {
             value: ByteArray,
         ) {
             if (gatt !== current) return
-            handleHeartRate(value)
+            handleWatchData(value)
         }
 
         override fun onCharacteristicWrite(
@@ -513,17 +515,45 @@ class HeartRateService : Service() {
             }
 
             if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
-                LiveHeartRateState.set(
-                    LiveHeartRateState.snapshot.value.copy(
-                        timeSynced = true,
-                        status = "Live heart rate active • time synced",
-                    ),
-                )
-                updateNotification()
+                if (pendingTimeSyncWrite) {
+                    pendingTimeSyncWrite = false
+                    LiveHeartRateState.set(
+                        LiveHeartRateState.snapshot.value.copy(
+                            timeSynced = true,
+                            status = "Live heart rate active • time synced",
+                        ),
+                    )
+                    handler.postDelayed({
+                        requestBatteryLevel()
+                    }, 200L)
+                    startBatteryPolling()
+                    updateNotification(force = true)
+                }
             } else {
+                pendingTimeSyncWrite = false
                 updateStatus("Time sync failed")
             }
         }
+    }
+
+    private fun handleWatchData(packet: ByteArray) {
+        FastrackProtocol.decodeBattery(packet)?.let { battery ->
+            val current = LiveHeartRateState.snapshot.value
+            if (
+                current.batteryPercent != battery.percent ||
+                current.batteryCharging != battery.charging
+            ) {
+                LiveHeartRateState.set(
+                    current.copy(
+                        batteryPercent = battery.percent,
+                        batteryCharging = battery.charging,
+                    ),
+                )
+                updateNotification(force = true)
+            }
+        }
+
+        handleHeartRate(packet)
     }
 
     private fun handleHeartRate(packet: ByteArray) {
@@ -575,17 +605,48 @@ class HeartRateService : Service() {
 
         characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         characteristic.value = FastrackProtocol.buildTimeSyncPacket(Calendar.getInstance())
+        pendingTimeSyncWrite = true
 
         runCatching {
             if (!current.writeCharacteristic(characteristic)) {
+                pendingTimeSyncWrite = false
                 updateStatus("Time write was rejected")
             }
         }.onFailure {
+            pendingTimeSyncWrite = false
             updateStatus("Time sync failed")
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun requestBatteryLevel() {
+        val current = gatt ?: return
+        if (!LiveHeartRateState.snapshot.value.connected || !monitoringEnabled()) return
+
+        sendLiveCommand(current, FastrackProtocol.buildBatteryRequestPacket())
+    }
+
+    private fun startBatteryPolling() {
+        batteryRefreshRunnable?.let(handler::removeCallbacks)
+        batteryRefreshRunnable = object : Runnable {
+            override fun run() {
+                if (!monitoringEnabled() || !LiveHeartRateState.snapshot.value.connected) {
+                    batteryRefreshRunnable = null
+                    return
+                }
+
+                requestBatteryLevel()
+                handler.postDelayed(this, BATTERY_REFRESH_MS)
+            }
+        }
+        handler.postDelayed(batteryRefreshRunnable!!, BATTERY_REFRESH_MS)
+    }
+
+
     private fun resetLiveSession() {
+        batteryRefreshRunnable?.let(handler::removeCallbacks)
+        batteryRefreshRunnable = null
+        pendingTimeSyncWrite = false
         graphPoints = ArrayList()
         graphLastAt = 0L
         lastHeartRateAt = 0L
@@ -655,6 +716,9 @@ class HeartRateService : Service() {
     private fun disconnectUser() {
         reconnectRunnable?.let(handler::removeCallbacks)
         reconnectRunnable = null
+        batteryRefreshRunnable?.let(handler::removeCallbacks)
+        batteryRefreshRunnable = null
+        pendingTimeSyncWrite = false
         closeGatt()
         connectedAt = 0L
         streamRecoveryAttempts = 0
@@ -700,9 +764,14 @@ class HeartRateService : Service() {
 
     private fun buildNotification(): Notification {
         val snapshot = LiveHeartRateState.snapshot.value
-        val bpmText = snapshot.bpm?.let { it.toString() + " bpm" } ?: "No HR yet"
+        val bpmText = snapshot.bpm?.let { "$it bpm" } ?: "No HR yet"
 
         val stats = buildString {
+            snapshot.batteryPercent?.let {
+                append("Battery ").append(it).append("%")
+                if (snapshot.batteryCharging == true) append(" • Charging")
+                append(" • ")
+            }
             snapshot.averageBpm?.let { append("Avg ").append(it).append(" • ") }
             snapshot.minimumBpm?.let { append("Min ").append(it).append(" • ") }
             snapshot.maximumBpm?.let { append("Max ").append(it) }
@@ -718,7 +787,7 @@ class HeartRateService : Service() {
 
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(renderNotificationIcon(snapshot.bpm))
-            .setContentTitle(bpmText + " • FT_38093")
+            .setContentTitle(bpmText)
             .setContentText(stats)
             .setContentIntent(openIntent)
             .setOngoing(true)
@@ -977,7 +1046,10 @@ class HeartRateService : Service() {
     override fun onDestroy() {
         reconnectRunnable?.let(handler::removeCallbacks)
         watchdogRunnable?.let(handler::removeCallbacks)
+        batteryRefreshRunnable?.let(handler::removeCallbacks)
         reconnectRunnable = null
+        batteryRefreshRunnable = null
+        pendingTimeSyncWrite = false
         watchdogRunnable = null
         hideOverlay()
         closeGatt()
@@ -1075,6 +1147,7 @@ class HeartRateService : Service() {
         private const val LIVE_WATCHDOG_MS = 15000L
         private const val LIVE_STALE_MS = 12000L
         private const val NOTIFICATION_UPDATE_MS = 2000L
+        private const val BATTERY_REFRESH_MS = 5 * 60 * 1000L
         private const val DYNAMIC_HR_START_DELAY_MS = 1500L
 
         private const val RECONNECT_BASE_MS = 2000L
