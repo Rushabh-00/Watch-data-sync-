@@ -1,43 +1,149 @@
-name: Android Build
+name: Android Release
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
-  group: android-build-main
+  group: android-release-main
   cancel-in-progress: true
 
 env:
   GRADLE_VERSION: '9.6.0'
 
 jobs:
-  build:
-    name: Build and test APK
+  release:
+    name: Test, build, sign and release APK
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.6.0'
-      - name: Test and build debug APK
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Read app version
+        id: version
         working-directory: android
-        run: gradle test :app:assembleDebug --configuration-cache --build-cache --parallel
-      - name: Upload debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Test and build release APK
+        working-directory: android
+        run: gradle test :app:assembleRelease --configuration-cache --build-cache --parallel
+
+      - name: Sign release APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            test -n "${!name}" || { echo "Missing signing secret: $name"; exit 1; }
+          done
+
+          mkdir -p dist
+          KEYSTORE="$RUNNER_TEMP/watch-data-sync-release.jks"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/WatchDataSync-aligned.apk"
+          OUTPUT="dist/WatchDataSync-release.apk"
+
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          test -s "$UNSIGNED"
+
+          ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -1)"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
+          KEYTOOL="$JAVA_HOME/bin/keytool"
+
+          test -x "$ZIPALIGN"
+          test -x "$APKSIGNER"
+          test -x "$KEYTOOL"
+
+          "$KEYTOOL" -list \
+            -keystore "$KEYSTORE" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+
+          "$ZIPALIGN" -P 16 -f 4 "$UNSIGNED" "$ALIGNED"
+
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE" \
+            --ks-type JKS \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$OUTPUT" \
+            "$ALIGNED"
+
+          "$APKSIGNER" verify --verbose "$OUTPUT"
+          test -s "$OUTPUT"
+
+          rm -f "$ALIGNED" "$KEYSTORE"
+
+      - name: Upload signed APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WatchDataSync-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: WatchDataSync-v${{ steps.version.outputs.version }}
+          path: android/dist/WatchDataSync-release.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              dist/WatchDataSync-release.apk \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Watch Data Sync v$APP_VERSION"
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Watch Data Sync v$APP_VERSION" \
+              --generate-notes \
+              dist/WatchDataSync-release.apk
+          fi
+
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,name
+          echo "### Signed APK release" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download WatchDataSync-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-release.apk)" >> "$GITHUB_STEP_SUMMARY"
