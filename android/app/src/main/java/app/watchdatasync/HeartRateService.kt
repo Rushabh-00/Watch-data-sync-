@@ -675,7 +675,8 @@ class HeartRateService : Service() {
                 connected = false,
                 deviceName = prefs.getString(KEY_NAME, "FT_38093"),
                 status = "Connecting…",
-                notificationEnabled = monitoringEnabled(),
+                backgroundMonitoringEnabled = backgroundMonitoringEnabled(),
+                notificationEnabled = notificationEnabled(),
                 overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
             ),
@@ -694,7 +695,8 @@ class HeartRateService : Service() {
                 overlayVisible = prefs.getBoolean(KEY_OVERLAY_VISIBLE, false),
                 overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
-                notificationEnabled = monitoringEnabled(),
+                backgroundMonitoringEnabled = backgroundMonitoringEnabled(),
+                notificationEnabled = notificationEnabled(),
             ),
         )
     }
@@ -1031,6 +1033,24 @@ class HeartRateService : Service() {
         }
     }
 
+    private fun publishMonitoringState() {
+        val current = LiveHeartRateState.snapshot.value
+        LiveHeartRateState.set(
+            current.copy(
+                backgroundMonitoringEnabled = backgroundMonitoringEnabled(),
+            ),
+        )
+    }
+
+    private fun publishNotificationState() {
+        val current = LiveHeartRateState.snapshot.value
+        LiveHeartRateState.set(
+            current.copy(
+                notificationEnabled = notificationEnabled(),
+            ),
+        )
+    }
+
     private fun publishOverlayState() {
         val current = LiveHeartRateState.snapshot.value
         LiveHeartRateState.set(
@@ -1080,7 +1100,7 @@ class HeartRateService : Service() {
             LiveHeartRateState.snapshot.value.copy(
                 connected = false,
                 status = "Monitoring off",
-                notificationEnabled = false,
+                backgroundMonitoringEnabled = false,
                 overlayVisible = false,
             ),
         )
@@ -1282,6 +1302,14 @@ class HeartRateService : Service() {
                     .setAction(ACTION_OVERLAY_SIZE)
                     .putExtra(EXTRA_SCALE, scale),
             )
+        }
+
+        fun setNotificationEnabled(context: Context, enabled: Boolean) {
+            val intent = Intent(context, HeartRateService::class.java)
+                .setAction(ACTION_SET_NOTIFICATION)
+                .putExtra(EXTRA_ENABLED, enabled)
+
+            context.startService(intent)
         }
 
         fun setMonitoringEnabled(context: Context, enabled: Boolean) {
