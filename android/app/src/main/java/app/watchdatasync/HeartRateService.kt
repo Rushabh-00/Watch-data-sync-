@@ -67,7 +67,8 @@ class HeartRateService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        migratePreferences()
+        createNotificationChannels()
         loadSessionDefaults()
         if (monitoringEnabled()) {
             startForegroundCompat(buildNotification())
@@ -91,9 +92,17 @@ class HeartRateService : Service() {
                 }
             }
 
-            ACTION_SET_MONITORING -> {
+            ACTION_SET_NOTIFICATION -> {
                 val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
                 prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
+                publishNotificationState()
+                updateNotification(force = true)
+            }
+
+            ACTION_SET_MONITORING -> {
+                val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
+                prefs.edit().putBoolean(KEY_BACKGROUND_MONITORING_ENABLED, enabled).apply()
+                publishMonitoringState()
                 if (enabled) {
                     if (!runningForeground) startForegroundCompat(buildNotification())
                     startWatchdog()
@@ -891,15 +900,17 @@ class HeartRateService : Service() {
         runningForeground = true
     }
 
-    private fun createNotificationChannel() {
+    private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
-        val channel = NotificationChannel(
+        val manager = getSystemService(NotificationManager::class.java)
+
+        val activeChannel = NotificationChannel(
             CHANNEL_ID,
             "Live heart rate",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
-            description = "Ongoing live FT_38093 heart-rate connection"
+            description = "Live heart-rate updates"
             val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             setSound(
                 sound,
@@ -912,7 +923,18 @@ class HeartRateService : Service() {
             setShowBadge(true)
         }
 
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        val quietChannel = NotificationChannel(
+            QUIET_CHANNEL_ID,
+            "Background connection",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Quiet foreground connection required for background BLE monitoring"
+            setSound(null, null)
+            enableVibration(false)
+            setShowBadge(false)
+        }
+
+        manager.createNotificationChannels(listOf(activeChannel, quietChannel))
     }
 
     private fun pendingIntentFlags(): Int =
@@ -1066,7 +1088,24 @@ class HeartRateService : Service() {
     }
 
     private fun monitoringEnabled(): Boolean =
+        backgroundMonitoringEnabled()
+
+    private fun backgroundMonitoringEnabled(): Boolean =
+        prefs.getBoolean(KEY_BACKGROUND_MONITORING_ENABLED, true)
+
+    private fun notificationEnabled(): Boolean =
         prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
+
+    private fun migratePreferences() {
+        if (!prefs.contains(KEY_BACKGROUND_MONITORING_ENABLED)) {
+            prefs.edit()
+                .putBoolean(
+                    KEY_BACKGROUND_MONITORING_ENABLED,
+                    prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true),
+                )
+                .apply()
+        }
+    }
 
     override fun onDestroy() {
         reconnectRunnable?.let(handler::removeCallbacks)
@@ -1143,6 +1182,7 @@ class HeartRateService : Service() {
         const val ACTION_OVERLAY_LOCK = "app.watchdatasync.action.OVERLAY_LOCK"
         const val ACTION_OVERLAY_SIZE = "app.watchdatasync.action.OVERLAY_SIZE"
         const val ACTION_SET_MONITORING = "app.watchdatasync.action.SET_MONITORING"
+        const val ACTION_SET_NOTIFICATION = "app.watchdatasync.action.SET_NOTIFICATION"
         const val ACTION_SYNC_TIME = "app.watchdatasync.action.SYNC_TIME"
 
         const val EXTRA_ADDRESS = "extra_address"
@@ -1154,6 +1194,7 @@ class HeartRateService : Service() {
         const val PREFS = "watch_preferences"
         const val KEY_ADDRESS = "bound_watch_address"
         const val KEY_NAME = "bound_watch_name"
+        const val KEY_BACKGROUND_MONITORING_ENABLED = "background_monitoring_enabled"
         const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
         const val KEY_OVERLAY_VISIBLE = "overlay_visible"
         const val KEY_OVERLAY_LOCKED = "overlay_locked"
@@ -1162,6 +1203,7 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_Y = "overlay_y"
 
         private const val CHANNEL_ID = "live_heart_rate_v2"
+        private const val QUIET_CHANNEL_ID = "live_heart_rate_background_v1"
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
 
