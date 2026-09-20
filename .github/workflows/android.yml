@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  statuses: write
 
 concurrency:
   group: android-release-main
@@ -123,3 +124,26 @@ jobs:
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,name
           echo "### Signed ARM64 APK" >> "$GITHUB_STEP_SUMMARY"
           echo "[Download WatchDataSync-arm64-v8a-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-arm64-v8a-release.apk)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish workflow result to commit status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$JOB_STATUS" in
+            success) STATE="success" ;;
+            failure) STATE="failure" ;;
+            *) STATE="error" ;;
+          esac
+
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state="$STATE" \
+            -f context="android-release/github-actions" \
+            -f description="Android Release workflow: $JOB_STATUS" \
+            -f target_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
