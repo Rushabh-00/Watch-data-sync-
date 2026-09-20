@@ -415,18 +415,17 @@ private fun Dashboard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
-                        snapshot.batteryPercent?.let { percent ->
-                            val batteryText = buildString {
-                                append("Battery ").append(percent).append("%")
-                                if (snapshot.batteryCharging == true) append(" • Charging")
-                            }
-                            Text(
-                                batteryText,
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 1,
-                            )
+                        val batteryText = buildString {
+                            append("Battery ")
+                            append(snapshot.batteryPercent?.let { "$it%" } ?: "—")
+                            if (snapshot.batteryCharging == true) append(" • Charging")
                         }
+                        Text(
+                            batteryText,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
                     }
                 }
 
@@ -580,14 +579,13 @@ private fun Dashboard(
                         )
                     }
 
-                    snapshot.batteryPercent?.let { percent ->
-                        Text(
-                            "BATTERY $percent%",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
+                    Text(
+                        "BATTERY " + (snapshot.batteryPercent?.let { "$it%" } ?: "—"),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
