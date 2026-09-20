@@ -867,6 +867,7 @@ class HeartRateService : Service() {
 
         overlayView = text
         overlayParams = params
+        lastOverlayValue = null
         applyOverlayStyle()
 
         runCatching {
@@ -937,6 +938,7 @@ class HeartRateService : Service() {
         runCatching { manager.removeView(view) }
         overlayView = null
         overlayParams = null
+        lastOverlayValue = null
     }
 
     private fun stopMonitoring() {
