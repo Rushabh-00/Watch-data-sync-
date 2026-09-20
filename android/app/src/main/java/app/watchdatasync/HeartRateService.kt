@@ -147,7 +147,12 @@ class HeartRateService : Service() {
                 if (monitoringEnabled()) {
                     if (!runningForeground) startForegroundCompat(buildNotification())
                     startWatchdog()
-                    connectSavedDevice()
+
+                    // Do not tear down a healthy BLE session every time the app returns
+                    // to the foreground. Only connect when this service has no GATT.
+                    if (gatt == null) {
+                        connectSavedDevice()
+                    }
                 }
             }
         }
