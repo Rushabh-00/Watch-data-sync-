@@ -99,7 +99,8 @@ class MainActivity : ComponentActivity() {
         val initialEnabled = monitoringEnabled()
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
-                notificationEnabled = initialEnabled,
+                backgroundMonitoringEnabled = initialEnabled,
+                notificationEnabled = notificationEnabled(),
             ),
         )
 
@@ -167,7 +168,7 @@ class MainActivity : ComponentActivity() {
                         onMonitoringEnabled = {
                             LiveHeartRateState.set(
                                 LiveHeartRateState.snapshot.value.copy(
-                                    notificationEnabled = it,
+                                    backgroundMonitoringEnabled = it,
                                 ),
                             )
                             HeartRateService.setMonitoringEnabled(
@@ -177,6 +178,17 @@ class MainActivity : ComponentActivity() {
                             if (it) {
                                 requestTimeSyncForCurrentOpen()
                             }
+                        },
+                        onNotificationEnabled = {
+                            LiveHeartRateState.set(
+                                LiveHeartRateState.snapshot.value.copy(
+                                    notificationEnabled = it,
+                                ),
+                            )
+                            HeartRateService.setNotificationEnabled(
+                                this@MainActivity,
+                                it,
+                            )
                         },
                     )
                 }
@@ -274,6 +286,15 @@ class MainActivity : ComponentActivity() {
             HeartRateService.PREFS,
             MODE_PRIVATE,
         ).getBoolean(
+            HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED,
+            true,
+        )
+
+    private fun notificationEnabled(): Boolean =
+        getSharedPreferences(
+            HeartRateService.PREFS,
+            MODE_PRIVATE,
+        ).getBoolean(
             HeartRateService.KEY_NOTIFICATION_ENABLED,
             true,
         )
@@ -308,6 +329,7 @@ private fun Dashboard(
     onOverlayLock: (Boolean) -> Unit,
     onOverlaySize: (Float) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
+    onNotificationEnabled: (Boolean) -> Unit,
 ) {
     var graphWindow by remember { mutableStateOf(GraphWindow.H5) }
     var selectedPoint by remember { mutableStateOf<HeartRatePoint?>(null) }
@@ -649,16 +671,27 @@ private fun Dashboard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = onOverlay,
-                        enabled = snapshot.connected,
-                    ) {
-                        Text("Show overlay")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Overlay",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Remembered across app restarts.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
-                    OutlinedButton(onClick = onOverlayOff) {
-                        Text("Hide")
-                    }
+                    Switch(
+                        checked = snapshot.overlayVisible,
+                        onCheckedChange = { enabled ->
+                            if (enabled) onOverlay() else onOverlayOff()
+                        },
+                    )
                 }
 
                 Row(
@@ -728,22 +761,42 @@ private fun Dashboard(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "Turning this off disconnects the watch and stops background BLE monitoring.",
+                            "Off = disconnect watch. On = reconnect saved watch automatically, including after reopening the app.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
 
                     Switch(
-                        checked = snapshot.notificationEnabled,
+                        checked = snapshot.backgroundMonitoringEnabled,
                         onCheckedChange = onMonitoringEnabled,
                     )
                 }
 
-                Text(
-                    "Notification icon follows the latest BPM without re-alerting on every sample.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "NOTIFICATIONS",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (snapshot.notificationEnabled) {
+                                "Live BPM, stats and battery in the notification."
+                            } else {
+                                "Quiet background notification keeps BLE service running."
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    Switch(
+                        checked = snapshot.notificationEnabled,
+                        onCheckedChange = onNotificationEnabled,
+                    )
+                }
             }
         }
 
