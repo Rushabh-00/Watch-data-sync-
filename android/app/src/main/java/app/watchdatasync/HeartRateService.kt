@@ -272,10 +272,7 @@ class HeartRateService : Service() {
 
             if (!sendLiveCommand(current, FastrackProtocol.buildLiveHeartRateStartPacket())) {
                 refreshLiveSubscription()
-                return@postDelayed
             }
-
-            // HR stream recovery does not synchronize time.
         }, DYNAMIC_HR_START_DELAY_MS)
     }
 
@@ -457,7 +454,7 @@ class HeartRateService : Service() {
                 return
             }
 
-            updateStatus("Live heart rate active • syncing time…")
+            updateStatus("Live heart rate active")
         }
 
         override fun onDescriptorWrite(
