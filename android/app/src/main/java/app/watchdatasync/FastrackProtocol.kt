@@ -27,9 +27,6 @@ object FastrackProtocol {
         return bpm.takeIf { it in 30..220 }
     }
 
-    fun matchesService(uuid: String): Boolean =
-        uuid.equals(SERVICE_UUID, ignoreCase = true)
-
-    fun isTargetName(name: String?): Boolean =
-        name?.startsWith("FT_38093", ignoreCase = true) == true
+    fun matchesService(uuid: String): Boolean = uuid.equals(SERVICE_UUID, ignoreCase = true)
+    fun isTargetName(name: String?): Boolean = name?.startsWith("FT_38093", ignoreCase = true) == true
 }
