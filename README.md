@@ -5,7 +5,7 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 ## Included
 
 - Saved FT_38093 device with automatic reconnect.
-- Automatic time sync after the live-heart-rate channel is enabled.
+- Automatic watch-time sync when the app is opened.
 - Watch battery read using the verified A2 command, refreshed automatically while connected.
 - Background BLE monitoring through a connected-device foreground service.
 - Notification status-bar icon that renders the current BPM.
@@ -17,7 +17,6 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 - ARM64-only release APK.
 - R8/resource shrinking for a small release APK.
 - Optional background-monitoring/notification switch.
-- Optional keep-live-HR recovery when the watch display is off.
 
 ## Live stream behavior
 
@@ -29,7 +28,7 @@ The app enables the FT_38093 GATT live-data channel in a connected-device foregr
 
 The reverse-engineered RyzeWaveWatch project documents and uses this exact D6 02 → E5 11 sequence for live HR. This app also monitors the packet flow while connected. When the stream becomes stale, it first re-sends the dynamic start sequence, then refreshes the BLE subscription, and finally reconnects if recovery still fails.
 
-The “Keep live HR when watch screen is off” switch controls this recovery loop and is enabled by default. Firmware behavior can still vary by device, so the FT_38093 needs real-device validation with the display off.
+Live-HR recovery is always enabled; there is no separate screen-off setting. Firmware behavior can still vary by device, so the FT_38093 needs real-device validation with the display off.
 
 ## Scope
 
@@ -37,7 +36,7 @@ No health history, steps, calories, distance, SpO2, sleep, battery history, diag
 
 ## Notification icon
 
-The status-bar icon follows the current BPM using a generated monochrome notification icon, modeled on the approach used by the open-source Beam Android app, which renders a value into an Icon from a bitmap for its notification indicator.
+The status-bar icon follows the current BPM using a generated monochrome notification icon, and the notification content ends with the watch battery level when available.
 
 ## Build
 
