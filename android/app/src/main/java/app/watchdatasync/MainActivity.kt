@@ -174,6 +174,9 @@ class MainActivity : ComponentActivity() {
                                 this@MainActivity,
                                 it,
                             )
+                            if (it) {
+                                requestTimeSyncForCurrentOpen()
+                            }
                         },
                     )
                 }
