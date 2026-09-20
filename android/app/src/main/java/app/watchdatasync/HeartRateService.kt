@@ -395,6 +395,11 @@ class HeartRateService : Service() {
             status: Int,
             newState: Int,
         ) {
+            if (gatt !== current) {
+                runCatching { current.close() }
+                return
+            }
+
             if (
                 status == android.bluetooth.BluetoothGatt.GATT_SUCCESS &&
                 newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED
@@ -437,6 +442,8 @@ class HeartRateService : Service() {
             current: android.bluetooth.BluetoothGatt,
             status: Int,
         ) {
+            if (gatt !== current) return
+
             if (status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 updateStatus("Service discovery failed")
                 scheduleReconnect()
@@ -457,6 +464,8 @@ class HeartRateService : Service() {
             descriptor: android.bluetooth.BluetoothGattDescriptor,
             status: Int,
         ) {
+            if (gatt !== current) return
+
             if (
                 descriptor.characteristic.uuid.toString()
                     .equals(FastrackProtocol.LIVE_DATA_UUID, ignoreCase = true)
@@ -475,6 +484,7 @@ class HeartRateService : Service() {
             current: android.bluetooth.BluetoothGatt,
             characteristic: android.bluetooth.BluetoothGattCharacteristic,
         ) {
+            if (gatt !== current) return
             handleHeartRate(characteristic.value)
         }
 
@@ -483,6 +493,7 @@ class HeartRateService : Service() {
             characteristic: android.bluetooth.BluetoothGattCharacteristic,
             value: ByteArray,
         ) {
+            if (gatt !== current) return
             handleHeartRate(value)
         }
 
@@ -491,6 +502,8 @@ class HeartRateService : Service() {
             characteristic: android.bluetooth.BluetoothGattCharacteristic,
             status: Int,
         ) {
+            if (gatt !== current) return
+
             if (
                 !characteristic.uuid.toString()
                     .equals(FastrackProtocol.TIME_WRITE_UUID, ignoreCase = true)
@@ -523,23 +536,26 @@ class HeartRateService : Service() {
         min = minOf(min, bpm)
         max = maxOf(max, bpm)
 
+        var graphChanged = false
         if (now - graphLastAt >= GRAPH_SAMPLE_MS || graphPoints.isEmpty()) {
             graphPoints.add(HeartRatePoint(now, bpm))
             if (graphPoints.size > MAX_GRAPH_POINTS) {
                 graphPoints.removeAt(0)
             }
             graphLastAt = now
+            graphChanged = true
         }
 
         val average = (sum.toDouble() / sampleCount).roundToInt()
+        val current = LiveHeartRateState.snapshot.value
 
         LiveHeartRateState.set(
-            LiveHeartRateState.snapshot.value.copy(
+            current.copy(
                 bpm = bpm,
                 averageBpm = average,
                 minimumBpm = min.takeIf { it != Int.MAX_VALUE },
                 maximumBpm = max.takeIf { it != Int.MIN_VALUE },
-                graph = graphPoints.toList(),
+                graph = if (graphChanged) graphPoints.toList() else current.graph,
                 connected = true,
                 status = "Live heart rate active",
             ),
@@ -744,6 +760,7 @@ class HeartRateService : Service() {
 
         val snapshot = LiveHeartRateState.snapshot.value
         val now = System.currentTimeMillis()
+        if (!force && snapshot.bpm == lastNotifiedBpm) return
         if (!force && now - lastNotificationAt < NOTIFICATION_UPDATE_MS) return
 
         lastNotificationAt = now
