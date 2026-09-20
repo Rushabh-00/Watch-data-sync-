@@ -1,20 +1,21 @@
 # Watch Data Sync
 
-Minimal Android BLE companion for the Fastrack/Titan FT_38093 watch.
+Minimal FT_38093 Android companion focused on live heart rate and watch time.
 
-## Only two functions
+## Included
 
-1. Sync the watch clock to the phone time.
-2. Receive live heart rate.
+- Auto-connect to the saved FT_38093 watch.
+- Auto-reconnect while the background service is running.
+- Automatic watch-time sync after the live HR channel is enabled.
+- Live heart rate in the app.
+- Session average, minimum and maximum BPM.
+- Lightweight live trend graph held in RAM only.
+- Ongoing visible notification with the current BPM and session stats.
+- Optional floating heart-rate overlay.
+- Foreground connected-device service for background BLE notifications.
+- ARM64-only APK output.
+- R8/minified release build with resource shrinking.
 
-No history sync, steps, calories, distance, SpO2, sleep, battery, notifications, watch faces, vendor-history decoding, diagnostics, or background health-data sync.
+The app intentionally does not implement health history, steps, calories, distance, SpO2, sleep, battery history, diagnostics, or other watch data.
 
-## Verified FT_38093 protocol
-
-- Service: `000055ff-0000-1000-8000-00805f9b34fb`
-- Time write characteristic: `000033f1-0000-1000-8000-00805f9b34fb`
-- Live heart-rate characteristic: `000033f2-0000-1000-8000-00805f9b34fb`
-- Time packet: `A3 YYYY MM DD HH MM SS`
-- Live heart-rate frame: `E5 11 00 BPM`
-
-The repository has been rebuilt from a clean root tree. The previous protocol/history/diagnostics resources are not included.
+The saved watch address is stored locally so the app can reconnect automatically after the app is opened again and after supported service restarts.

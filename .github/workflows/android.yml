@@ -50,11 +50,11 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Test and build release APK
+      - name: Test and build ARM64 release APK
         working-directory: android
         run: gradle test :app:assembleRelease --configuration-cache --build-cache --parallel
 
-      - name: Sign release APK
+      - name: Sign ARM64 release APK
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -71,10 +71,11 @@ jobs:
 
           mkdir -p dist
           KEYSTORE="$RUNNER_TEMP/watch-data-sync-release.jks"
-          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
-          ALIGNED="$RUNNER_TEMP/WatchDataSync-aligned.apk"
-          OUTPUT="dist/WatchDataSync-release.apk"
+          UNSIGNED="$(find app/build/outputs/apk/release -maxdepth 1 -type f -name 'app-arm64-v8a-release-unsigned.apk' -print -quit)"
+          ALIGNED="$RUNNER_TEMP/WatchDataSync-arm64-aligned.apk"
+          OUTPUT="dist/WatchDataSync-arm64-v8a-release.apk"
 
+          test -n "$UNSIGNED"
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
           test -s "$KEYSTORE"
           test -s "$UNSIGNED"
@@ -83,36 +84,22 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)"
           KEYTOOL="$JAVA_HOME/bin/keytool"
 
-          test -x "$ZIPALIGN"
-          test -x "$APKSIGNER"
-          test -x "$KEYTOOL"
-
-          "$KEYTOOL" -list \
-            -keystore "$KEYSTORE" \
-            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          "$KEYTOOL" -list             -keystore "$KEYSTORE"             -storepass "$ANDROID_KEYSTORE_PASSWORD"             -alias "$ANDROID_KEY_ALIAS" >/dev/null
 
           "$ZIPALIGN" -P 16 -f 4 "$UNSIGNED" "$ALIGNED"
 
-          "$APKSIGNER" sign \
-            --ks "$KEYSTORE" \
-            --ks-type JKS \
-            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
-            --ks-key-alias "$ANDROID_KEY_ALIAS" \
-            --key-pass env:ANDROID_KEY_PASSWORD \
-            --out "$OUTPUT" \
-            "$ALIGNED"
+          "$APKSIGNER" sign             --ks "$KEYSTORE"             --ks-type JKS             --ks-pass env:ANDROID_KEYSTORE_PASSWORD             --ks-key-alias "$ANDROID_KEY_ALIAS"             --key-pass env:ANDROID_KEY_PASSWORD             --out "$OUTPUT"             "$ALIGNED"
 
           "$APKSIGNER" verify --verbose "$OUTPUT"
           test -s "$OUTPUT"
 
           rm -f "$ALIGNED" "$KEYSTORE"
 
-      - name: Upload signed APK artifact
+      - name: Upload signed ARM64 APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WatchDataSync-v${{ steps.version.outputs.version }}
-          path: android/dist/WatchDataSync-release.apk
+          name: WatchDataSync-v${{ steps.version.outputs.version }}-arm64
+          path: android/dist/WatchDataSync-arm64-v8a-release.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -127,23 +114,12 @@ jobs:
           set -euo pipefail
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              dist/WatchDataSync-release.apk \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
-
-            gh release edit "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "Watch Data Sync v$APP_VERSION"
+            gh release upload "$RELEASE_TAG"               dist/WatchDataSync-arm64-v8a-release.apk               --repo "$GITHUB_REPOSITORY"               --clobber
+            gh release edit "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --title "Watch Data Sync v$APP_VERSION"
           else
-            gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Watch Data Sync v$APP_VERSION" \
-              --generate-notes \
-              dist/WatchDataSync-release.apk
+            gh release create "$RELEASE_TAG"               --repo "$GITHUB_REPOSITORY"               --target "$GITHUB_SHA"               --title "Watch Data Sync v$APP_VERSION"               --generate-notes               dist/WatchDataSync-arm64-v8a-release.apk
           fi
 
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json url,name
-          echo "### Signed APK release" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Download WatchDataSync-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-release.apk)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Signed ARM64 APK" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download WatchDataSync-arm64-v8a-release.apk](https://github.com/${{ github.repository }}/releases/download/${RELEASE_TAG}/WatchDataSync-arm64-v8a-release.apk)" >> "$GITHUB_STEP_SUMMARY"
