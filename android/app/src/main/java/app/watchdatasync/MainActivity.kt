@@ -133,6 +133,17 @@ class MainActivity : ComponentActivity() {
                                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                                 !Settings.canDrawOverlays(this@MainActivity)
                             ) {
+                                getSharedPreferences(
+                                    HeartRateService.PREFS,
+                                    MODE_PRIVATE,
+                                ).edit()
+                                    .putBoolean(HeartRateService.KEY_OVERLAY_VISIBLE, true)
+                                    .apply()
+                                LiveHeartRateState.set(
+                                    LiveHeartRateState.snapshot.value.copy(
+                                        overlayVisible = true,
+                                    ),
+                                )
                                 startActivity(
                                     Intent(
                                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -281,14 +292,20 @@ class MainActivity : ComponentActivity() {
         ).edit().putString(KEY_THEME_MODE, mode.key).apply()
     }
 
-    private fun monitoringEnabled(): Boolean =
-        getSharedPreferences(
-            HeartRateService.PREFS,
-            MODE_PRIVATE,
-        ).getBoolean(
+    private fun monitoringEnabled(): Boolean {
+        val prefs = getSharedPreferences(HeartRateService.PREFS, MODE_PRIVATE)
+        if (!prefs.contains(HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED)) {
+            val legacy = prefs.getBoolean(HeartRateService.KEY_NOTIFICATION_ENABLED, true)
+            prefs.edit()
+                .putBoolean(HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED, legacy)
+                .apply()
+            return legacy
+        }
+        return prefs.getBoolean(
             HeartRateService.KEY_BACKGROUND_MONITORING_ENABLED,
             true,
         )
+    }
 
     private fun notificationEnabled(): Boolean =
         getSharedPreferences(
