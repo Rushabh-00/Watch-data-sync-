@@ -469,6 +469,8 @@ class HeartRateService : Service() {
             ) {
                 if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                     updateStatus("Live heart rate active")
+                    requestBatteryLevel()
+                    startBatteryPolling()
                     startDynamicHeartRateStream()
                 } else {
                     updateStatus("Live heart-rate setup failed")
@@ -513,15 +515,10 @@ class HeartRateService : Service() {
                     pendingTimeSyncWrite = false
                     LiveHeartRateState.set(
                         LiveHeartRateState.snapshot.value.copy(
-                            timeSynced = true,
                             status = "Live heart rate active • time synced",
                         ),
                     )
                     timeSyncRequested = false
-                    handler.postDelayed({
-                        requestBatteryLevel()
-                    }, 200L)
-                    startBatteryPolling()
                     updateNotification(force = true)
                 }
             } else {
@@ -924,8 +921,6 @@ class HeartRateService : Service() {
 
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         val scale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f)
-        val locked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false)
-
         val text = TextView(this).apply {
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
