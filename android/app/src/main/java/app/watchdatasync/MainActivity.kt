@@ -110,76 +110,73 @@ class MainActivity : ComponentActivity() {
             var themeMode by remember { mutableStateOf(loadThemeMode()) }
 
             WatchDataSyncTheme(themeMode) {
-                Surface(Modifier.fillMaxSize()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.background),
-                    ) {
-                        Dashboard(
-                            snapshot = snapshot,
-                            devices = devices,
-                            onScan = { refreshDiscovery(force = true) },
-                            onConnect = {
-                                HeartRateService.connect(
-                                    this@MainActivity,
-                                    it.device.address,
-                                    it.name,
-                                )
-                            },
-                            onDisconnect = {
-                                HeartRateService.disconnect(this@MainActivity)
-                            },
-                            onOverlay = {
-                                if (
-                                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                                    !Settings.canDrawOverlays(this@MainActivity)
-                                ) {
-                                    startActivity(
-                                        Intent(
-                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            android.net.Uri.parse(
-                                                "package:$packageName",
-                                            ),
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    Dashboard(
+                        snapshot = snapshot,
+                        devices = devices,
+                        onScan = { refreshDiscovery(force = true) },
+                        onConnect = {
+                            HeartRateService.connect(
+                                this@MainActivity,
+                                it.device.address,
+                                it.name,
+                            )
+                        },
+                        onDisconnect = {
+                            HeartRateService.disconnect(this@MainActivity)
+                        },
+                        onOverlay = {
+                            if (
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                !Settings.canDrawOverlays(this@MainActivity)
+                            ) {
+                                startActivity(
+                                    Intent(
+                                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        android.net.Uri.parse(
+                                            "package:$packageName",
                                         ),
-                                    )
-                                } else {
-                                    HeartRateService.overlayOn(this@MainActivity)
-                                }
-                            },
-                            onOverlayOff = {
-                                HeartRateService.overlayOff(this@MainActivity)
-                            },
-                            onOverlayLock = {
-                                HeartRateService.overlayLock(
-                                    this@MainActivity,
-                                    it,
-                                )
-                            },
-                            onOverlaySize = {
-                                HeartRateService.overlaySize(
-                                    this@MainActivity,
-                                    it,
-                                )
-                            },
-                            currentThemeMode = themeMode,
-                            onThemeMode = {
-                                themeMode = it
-                                saveThemeMode(it)
-                            },
-                            onMonitoringEnabled = {
-                                LiveHeartRateState.set(
-                                    LiveHeartRateState.snapshot.value.copy(
-                                        notificationEnabled = it,
                                     ),
                                 )
-                                HeartRateService.setMonitoringEnabled(
-                                    this@MainActivity,
-                                    it,
-                                )
-                            },
-                        )
-                    }
+                            } else {
+                                HeartRateService.overlayOn(this@MainActivity)
+                            }
+                        },
+                        onOverlayOff = {
+                            HeartRateService.overlayOff(this@MainActivity)
+                        },
+                        onOverlayLock = {
+                            HeartRateService.overlayLock(
+                                this@MainActivity,
+                                it,
+                            )
+                        },
+                        onOverlaySize = {
+                            HeartRateService.overlaySize(
+                                this@MainActivity,
+                                it,
+                            )
+                        },
+                        currentThemeMode = themeMode,
+                        onThemeMode = {
+                            themeMode = it
+                            saveThemeMode(it)
+                        },
+                        onMonitoringEnabled = {
+                            LiveHeartRateState.set(
+                                LiveHeartRateState.snapshot.value.copy(
+                                    notificationEnabled = it,
+                                ),
+                            )
+                            HeartRateService.setMonitoringEnabled(
+                                this@MainActivity,
+                                it,
+                            )
+                        },
+                    )
                 }
             }
         }
@@ -837,6 +834,14 @@ private fun StatPill(
 }
 
 @Composable
+private data class GraphMetrics(
+    val minTime: Long,
+    val timeRange: Long,
+    val minValue: Int,
+    val valueRange: Int,
+)
+
+@Composable
 private fun HeartGraph(
     points: List<HeartRatePoint>,
     selectedPoint: HeartRatePoint?,
@@ -857,12 +862,23 @@ private fun HeartGraph(
         return
     }
 
-    val minTime = points.minOf { it.timestamp }
-    val maxTime = points.maxOf { it.timestamp }
-    val timeRange = (maxTime - minTime).coerceAtLeast(1L)
-    val minValue = (points.minOf { it.bpm } - 4).coerceAtLeast(20)
-    val maxValue = (points.maxOf { it.bpm } + 4).coerceAtMost(220)
-    val valueRange = (maxValue - minValue).coerceAtLeast(1)
+    val graphMetrics = remember(points) {
+        val minTime = points.minOf { it.timestamp }
+        val maxTime = points.maxOf { it.timestamp }
+        val minValue = (points.minOf { it.bpm } - 4).coerceAtLeast(20)
+        val maxValue = (points.maxOf { it.bpm } + 4).coerceAtMost(220)
+        GraphMetrics(
+            minTime = minTime,
+            timeRange = (maxTime - minTime).coerceAtLeast(1L),
+            minValue = minValue,
+            valueRange = (maxValue - minValue).coerceAtLeast(1),
+        )
+    }
+
+    val minTime = graphMetrics.minTime
+    val timeRange = graphMetrics.timeRange
+    val minValue = graphMetrics.minValue
+    val valueRange = graphMetrics.valueRange
     val graphColor = MaterialTheme.colorScheme.primary
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val selectedColor = MaterialTheme.colorScheme.onSurface
