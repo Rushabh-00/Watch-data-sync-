@@ -172,6 +172,61 @@ class HeartRateService : Service() {
     }
 
     @SuppressLint("MissingPermission")
+    private fun sendLiveCommand(
+        current: android.bluetooth.BluetoothGatt,
+        payload: ByteArray,
+    ): Boolean {
+        val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID))
+            ?: return false
+        val command = service.getCharacteristic(
+            UUID.fromString(FastrackProtocol.TIME_WRITE_UUID),
+        ) ?: return false
+
+        val noResponse =
+            command.properties and
+                android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+
+        command.writeType =
+            if (noResponse) {
+                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            } else {
+                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            }
+
+        command.value = payload
+
+        return runCatching {
+            current.writeCharacteristic(command)
+        }.getOrDefault(false)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startDynamicHeartRateStream() {
+        val current = gatt ?: return
+        if (!LiveHeartRateState.snapshot.value.connected || !monitoringEnabled()) return
+
+        if (!sendLiveCommand(current, byteArrayOf(0xD6.toByte(), 0x02))) {
+            updateStatus("Could not start dynamic heart-rate mode")
+            return
+        }
+
+        handler.postDelayed({
+            if (gatt !== current || !monitoringEnabled()) return@postDelayed
+
+            if (!sendLiveCommand(current, byteArrayOf(0xE5.toByte(), 0x11))) {
+                updateStatus("Could not start live heart-rate stream")
+                return@postDelayed
+            }
+
+            handler.postDelayed({
+                if (gatt === current && monitoringEnabled()) {
+                    syncTimeInternal()
+                }
+            }, 250L)
+        }, DYNAMIC_HR_START_DELAY_MS)
+    }
+
+    @SuppressLint("MissingPermission")
     private fun configureNotifications(current: android.bluetooth.BluetoothGatt): Boolean {
         val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID))
         val live = service?.getCharacteristic(UUID.fromString(FastrackProtocol.LIVE_DATA_UUID))
@@ -321,7 +376,7 @@ class HeartRateService : Service() {
             ) {
                 if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                     updateStatus("Live heart rate active")
-                    syncTimeInternal()
+                    startDynamicHeartRateStream()
                 } else {
                     updateStatus("Live heart-rate setup failed")
                     scheduleReconnect()
@@ -656,7 +711,7 @@ class HeartRateService : Service() {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 80f * scale
-                setColor(Color.argb(230, 10, 16, 28))
+                setColor(Color.argb(150, 10, 16, 28))
                 setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
             }
             setOnTouchListener(OverlayDragListener(manager, this))
