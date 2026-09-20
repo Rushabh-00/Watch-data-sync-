@@ -331,7 +331,7 @@ private fun Dashboard(
                 Text(
                     "WATCH DATA SYNC",
                     style = MaterialTheme.typography.labelLarge,
-                    color = graphColor,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.height(4.dp))
