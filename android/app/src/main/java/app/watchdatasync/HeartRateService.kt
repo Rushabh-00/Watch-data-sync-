@@ -47,6 +47,7 @@ class HeartRateService : Service() {
     private var lastNotifiedBpm: Int? = null
     private var batteryRefreshRunnable: Runnable? = null
     private var pendingTimeSyncWrite = false
+    private var timeSyncRequested = false
 
     private var graphPoints = ArrayList<HeartRatePoint>()
     private var sampleCount = 0L
@@ -75,19 +76,16 @@ class HeartRateService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_SET_KEEP_LIVE -> {
-                val enabled = intent.getBooleanExtra(EXTRA_KEEP_LIVE, true)
-                prefs.edit().putBoolean(KEY_KEEP_LIVE_SCREEN_OFF, enabled).apply()
-                publishKeepLiveState()
-
-                if (enabled && monitoringEnabled()) {
+            ACTION_SYNC_TIME -> {
+                if (monitoringEnabled()) {
+                    timeSyncRequested = true
+                    if (!runningForeground) startForegroundCompat(buildNotification())
                     startWatchdog()
-                    if (LiveHeartRateState.snapshot.value.connected) {
-                        restartDynamicHeartRateStream()
+                    if (gatt == null) {
+                        connectSavedDevice()
+                    } else {
+                        scheduleRequestedTimeSync()
                     }
-                } else {
-                    watchdogRunnable?.let(handler::removeCallbacks)
-                    watchdogRunnable = null
                 }
             }
 
@@ -246,10 +244,14 @@ class HeartRateService : Service() {
             }
 
             handler.postDelayed({
-                if (gatt === current && monitoringEnabled()) {
+                if (
+                    gatt === current &&
+                    monitoringEnabled() &&
+                    timeSyncRequested
+                ) {
                     syncTimeInternal()
                 }
-            }, 250L)
+            }, 350L)
         }, DYNAMIC_HR_START_DELAY_MS)
     }
 
@@ -273,11 +275,7 @@ class HeartRateService : Service() {
                 return@postDelayed
             }
 
-            handler.postDelayed({
-                if (gatt === current && monitoringEnabled()) {
-                    syncTimeInternal()
-                }
-            }, 250L)
+            // HR stream recovery does not synchronize time.
         }, DYNAMIC_HR_START_DELAY_MS)
     }
 
@@ -344,11 +342,11 @@ class HeartRateService : Service() {
         watchdogRunnable?.let(handler::removeCallbacks)
         watchdogRunnable = null
 
-        if (!monitoringEnabled() || !keepLiveHeartRateWhenScreenOff()) return
+        if (!monitoringEnabled()) return
 
         val task = object : Runnable {
             override fun run() {
-                if (!monitoringEnabled() || !keepLiveHeartRateWhenScreenOff()) {
+                if (!monitoringEnabled()) {
                     watchdogRunnable = null
                     return
                 }
@@ -523,6 +521,7 @@ class HeartRateService : Service() {
                             status = "Live heart rate active • time synced",
                         ),
                     )
+                    timeSyncRequested = false
                     handler.postDelayed({
                         requestBatteryLevel()
                     }, 200L)
@@ -532,6 +531,11 @@ class HeartRateService : Service() {
             } else {
                 pendingTimeSyncWrite = false
                 updateStatus("Time sync failed")
+                if (timeSyncRequested) {
+                    handler.postDelayed({
+                        scheduleRequestedTimeSync()
+                    }, 1000L)
+                }
             }
         }
     }
@@ -647,6 +651,7 @@ class HeartRateService : Service() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
         pendingTimeSyncWrite = false
+        timeSyncRequested = false
         graphPoints = ArrayList()
         graphLastAt = 0L
         lastHeartRateAt = 0L
@@ -665,7 +670,6 @@ class HeartRateService : Service() {
                 notificationEnabled = monitoringEnabled(),
                 overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
-                keepLiveHrWhenScreenOff = keepLiveHeartRateWhenScreenOff(),
             ),
         )
     }
@@ -683,21 +687,23 @@ class HeartRateService : Service() {
                 overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
                 notificationEnabled = monitoringEnabled(),
-                keepLiveHrWhenScreenOff = keepLiveHeartRateWhenScreenOff(),
             ),
         )
     }
 
-    private fun keepLiveHeartRateWhenScreenOff(): Boolean =
-        prefs.getBoolean(KEY_KEEP_LIVE_SCREEN_OFF, true)
+    private fun scheduleRequestedTimeSync() {
+        val current = gatt ?: return
+        if (!timeSyncRequested || !monitoringEnabled()) return
 
-    private fun publishKeepLiveState() {
-        val current = LiveHeartRateState.snapshot.value
-        LiveHeartRateState.set(
-            current.copy(
-                keepLiveHrWhenScreenOff = keepLiveHeartRateWhenScreenOff(),
-            ),
-        )
+        handler.postDelayed({
+            if (
+                gatt === current &&
+                timeSyncRequested &&
+                monitoringEnabled()
+            ) {
+                syncTimeInternal()
+            }
+        }, 350L)
     }
 
     private fun updateStatus(value: String) {
@@ -719,6 +725,7 @@ class HeartRateService : Service() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
         pendingTimeSyncWrite = false
+        timeSyncRequested = false
         closeGatt()
         connectedAt = 0L
         streamRecoveryAttempts = 0
@@ -1118,14 +1125,13 @@ class HeartRateService : Service() {
         const val ACTION_OVERLAY_LOCK = "app.watchdatasync.action.OVERLAY_LOCK"
         const val ACTION_OVERLAY_SIZE = "app.watchdatasync.action.OVERLAY_SIZE"
         const val ACTION_SET_MONITORING = "app.watchdatasync.action.SET_MONITORING"
-        const val ACTION_SET_KEEP_LIVE = "app.watchdatasync.action.SET_KEEP_LIVE"
+        const val ACTION_SYNC_TIME = "app.watchdatasync.action.SYNC_TIME"
 
         const val EXTRA_ADDRESS = "extra_address"
         const val EXTRA_NAME = "extra_name"
         const val EXTRA_ENABLED = "extra_enabled"
         const val EXTRA_LOCKED = "extra_locked"
         const val EXTRA_SCALE = "extra_scale"
-        const val EXTRA_KEEP_LIVE = "extra_keep_live"
 
         const val PREFS = "watch_preferences"
         const val KEY_ADDRESS = "bound_watch_address"
@@ -1134,7 +1140,6 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_VISIBLE = "overlay_visible"
         const val KEY_OVERLAY_LOCKED = "overlay_locked"
         const val KEY_OVERLAY_SCALE = "overlay_scale"
-        const val KEY_KEEP_LIVE_SCREEN_OFF = "keep_live_hr_screen_off"
         const val KEY_OVERLAY_X = "overlay_x"
         const val KEY_OVERLAY_Y = "overlay_y"
 
@@ -1182,20 +1187,11 @@ class HeartRateService : Service() {
             )
         }
 
-        fun setKeepLiveWhenScreenOff(context: Context, enabled: Boolean) {
-            val intent = Intent(context, HeartRateService::class.java)
-                .setAction(ACTION_SET_KEEP_LIVE)
-                .putExtra(EXTRA_KEEP_LIVE, enabled)
-
-            val monitoring = context
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getBoolean(KEY_NOTIFICATION_ENABLED, true)
-
-            if (enabled && monitoring && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
+        fun syncTime(context: Context) {
+            context.startService(
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_SYNC_TIME),
+            )
         }
 
         fun overlayOn(context: Context) {
