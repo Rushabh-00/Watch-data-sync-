@@ -2,10 +2,18 @@ package app.watchdatasync
 
 import java.util.Calendar
 
+data class WatchBattery(
+    val percent: Int,
+    val charging: Boolean?,
+)
+
 object FastrackProtocol {
     const val SERVICE_UUID = "000055ff-0000-1000-8000-00805f9b34fb"
     const val TIME_WRITE_UUID = "000033f1-0000-1000-8000-00805f9b34fb"
     const val LIVE_DATA_UUID = "000033f2-0000-1000-8000-00805f9b34fb"
+
+    fun buildBatteryRequestPacket(): ByteArray =
+        byteArrayOf(0xA2.toByte())
 
     fun buildTimeSyncPacket(calendar: Calendar): ByteArray = byteArrayOf(
         0xA3.toByte(),
@@ -23,6 +31,20 @@ object FastrackProtocol {
 
     fun buildLiveHeartRateStartPacket(): ByteArray =
         byteArrayOf(0xE5.toByte(), 0x11)
+
+    fun decodeBattery(packet: ByteArray): WatchBattery? {
+        if (packet.size < 2) return null
+        if ((packet[0].toInt() and 0xFF) != 0xA2) return null
+
+        val percent = packet[1].toInt() and 0xFF
+        if (percent !in 0..100) return null
+
+        val charging = packet
+            .getOrNull(2)
+            ?.let { (it.toInt() and 0xFF) == 0x01 }
+
+        return WatchBattery(percent, charging)
+    }
 
     fun decodeLiveHeartRate(packet: ByteArray): Int? {
         if (packet.size < 4) return null
