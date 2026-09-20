@@ -8,9 +8,16 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Icon
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -21,23 +28,28 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
-import androidx.core.app.NotificationCompat
 import java.util.Calendar
 import java.util.UUID
 import kotlin.math.roundToInt
 
 class HeartRateService : Service() {
     private val handler = Handler(Looper.getMainLooper())
+
     private var gatt: android.bluetooth.BluetoothGatt? = null
     private var reconnectRunnable: Runnable? = null
+    private var watchdogRunnable: Runnable? = null
     private var reconnectAttempt = 0
     private var graphLastAt = 0L
-    private var samples = ArrayList<Int>()
-    private var graphPoints = ArrayList<Int>()
+    private var lastHeartRateAt = 0L
+
+    private var graphPoints = ArrayList<HeartRatePoint>()
+    private var sampleCount = 0L
     private var sum = 0L
     private var min = Int.MAX_VALUE
     private var max = Int.MIN_VALUE
-    private var overlayView: View? = null
+
+    private var overlayView: TextView? = null
+    private var overlayParams: WindowManager.LayoutParams? = null
 
     private val prefs by lazy {
         getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -46,27 +58,75 @@ class HeartRateService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForegroundCompat(buildNotification())
         loadSessionDefaults()
+        if (monitoringEnabled()) {
+            startForegroundCompat(buildNotification())
+            loadOverlayFromPrefs()
+            startWatchdog()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundCompat(buildNotification())
         when (intent?.action) {
+            ACTION_SET_MONITORING -> {
+                val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
+                prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
+                if (enabled) {
+                    if (!runningForeground) startForegroundCompat(buildNotification())
+                    startWatchdog()
+                    connectSavedDevice()
+                } else {
+                    stopMonitoring()
+                }
+            }
+
             ACTION_CONNECT -> {
                 val address = intent.getStringExtra(EXTRA_ADDRESS)
                 val name = intent.getStringExtra(EXTRA_NAME)
                 if (!address.isNullOrBlank()) {
+                    val previous = prefs.getString(KEY_ADDRESS, null)
                     saveDevice(address, name)
+                    if (previous != address) resetLiveSession()
+                    if (monitoringEnabled()) {
+                        if (!runningForeground) startForegroundCompat(buildNotification())
+                        startWatchdog()
+                        connectSavedDevice()
+                    }
+                }
+            }
+
+            ACTION_DISCONNECT -> disconnectUser()
+            ACTION_OVERLAY_ON -> {
+                prefs.edit().putBoolean(KEY_OVERLAY_VISIBLE, true).apply()
+                showOverlay()
+            }
+            ACTION_OVERLAY_OFF -> {
+                prefs.edit().putBoolean(KEY_OVERLAY_VISIBLE, false).apply()
+                hideOverlay()
+            }
+            ACTION_OVERLAY_LOCK -> {
+                val locked = intent.getBooleanExtra(EXTRA_LOCKED, true)
+                prefs.edit().putBoolean(KEY_OVERLAY_LOCKED, locked).apply()
+                applyOverlayStyle()
+                publishOverlayState()
+            }
+            ACTION_OVERLAY_SIZE -> {
+                val scale = intent
+                    .getFloatExtra(EXTRA_SCALE, 1f)
+                    .coerceIn(0.70f, 1.60f)
+                prefs.edit().putFloat(KEY_OVERLAY_SCALE, scale).apply()
+                applyOverlayStyle()
+                publishOverlayState()
+            }
+            ACTION_START, null -> {
+                if (monitoringEnabled()) {
+                    if (!runningForeground) startForegroundCompat(buildNotification())
+                    startWatchdog()
                     connectSavedDevice()
                 }
             }
-            ACTION_DISCONNECT -> disconnectUser()
-            ACTION_SYNC_TIME -> syncTime()
-            ACTION_OVERLAY_ON -> showOverlay()
-            ACTION_OVERLAY_OFF -> hideOverlay()
-            ACTION_START, null -> connectSavedDevice()
         }
+
         return START_STICKY
     }
 
@@ -76,6 +136,9 @@ class HeartRateService : Service() {
             updateStatus("Ready • scan to connect")
             return
         }
+
+        if (!monitoringEnabled()) return
+
         val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter
         if (adapter == null || !adapter.isEnabled) {
             updateStatus("Bluetooth is off")
@@ -93,10 +156,15 @@ class HeartRateService : Service() {
         }
 
         closeGatt()
-        resetLiveSession()
         updateStatus("Connecting to " + (prefs.getString(KEY_NAME, null) ?: "FT_38093") + "…")
+
         try {
-            gatt = device.connectGatt(this, false, gattCallback, android.bluetooth.BluetoothDevice.TRANSPORT_LE)
+            gatt = device.connectGatt(
+                this,
+                false,
+                gattCallback,
+                android.bluetooth.BluetoothDevice.TRANSPORT_LE,
+            )
         } catch (_: SecurityException) {
             updateStatus("Bluetooth permission is required")
             scheduleReconnect()
@@ -114,8 +182,11 @@ class HeartRateService : Service() {
             return false
         }
 
-        val notify = live.properties and android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
-        val indicate = live.properties and android.bluetooth.BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+        val notify =
+            live.properties and android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
+        val indicate =
+            live.properties and android.bluetooth.BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+
         if (!notify && !indicate) {
             updateStatus("Live heart-rate channel is not notifiable")
             return false
@@ -145,6 +216,40 @@ class HeartRateService : Service() {
             updateStatus("Bluetooth permission is required")
             false
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun refreshLiveSubscription() {
+        val current = gatt ?: return
+        if (!LiveHeartRateState.snapshot.value.connected) return
+        if (!configureNotifications(current)) {
+            closeGatt()
+            scheduleReconnect()
+            return
+        }
+        updateStatus("Refreshing live heart-rate stream…")
+    }
+
+    private fun startWatchdog() {
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = object : Runnable {
+            override fun run() {
+                if (!monitoringEnabled()) return
+
+                val now = System.currentTimeMillis()
+                val connected = LiveHeartRateState.snapshot.value.connected
+                val stale = connected && lastHeartRateAt > 0L &&
+                    now - lastHeartRateAt >= LIVE_STALE_MS
+
+                if (stale) {
+                    updateStatus("Watch live stream quiet • re-subscribing…")
+                    refreshLiveSubscription()
+                }
+
+                handler.postDelayed(this, LIVE_WATCHDOG_MS)
+            }
+        }
+        handler.postDelayed(watchdogRunnable!!, LIVE_WATCHDOG_MS)
     }
 
     @SuppressLint("MissingPermission")
@@ -216,7 +321,7 @@ class HeartRateService : Service() {
             ) {
                 if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                     updateStatus("Live heart rate active")
-                    syncTime()
+                    syncTimeInternal()
                 } else {
                     updateStatus("Live heart-rate setup failed")
                     scheduleReconnect()
@@ -267,23 +372,24 @@ class HeartRateService : Service() {
 
     private fun handleHeartRate(packet: ByteArray) {
         val bpm = FastrackProtocol.decodeLiveHeartRate(packet) ?: return
+
+        val now = System.currentTimeMillis()
+        lastHeartRateAt = now
+        sampleCount += 1
         sum += bpm
-        samples.add(bpm)
-        if (samples.size > MAX_SESSION_SAMPLES) {
-            val removed = samples.removeAt(0)
-            sum -= removed
-        }
         min = minOf(min, bpm)
         max = maxOf(max, bpm)
 
-        val now = System.currentTimeMillis()
         if (now - graphLastAt >= GRAPH_SAMPLE_MS || graphPoints.isEmpty()) {
-            graphPoints.add(bpm)
-            if (graphPoints.size > MAX_GRAPH_POINTS) graphPoints.removeAt(0)
+            graphPoints.add(HeartRatePoint(now, bpm))
+            if (graphPoints.size > MAX_GRAPH_POINTS) {
+                graphPoints.removeAt(0)
+            }
             graphLastAt = now
         }
 
-        val average = (sum.toDouble() / samples.size).roundToInt()
+        val average = (sum.toDouble() / sampleCount).roundToInt()
+
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
                 bpm = bpm,
@@ -297,11 +403,11 @@ class HeartRateService : Service() {
         )
 
         updateNotification()
-        updateOverlay(bpm)
+        updateOverlay()
     }
 
     @SuppressLint("MissingPermission")
-    private fun syncTime() {
+    private fun syncTimeInternal() {
         val current = gatt ?: return
         val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID)) ?: return
         val characteristic =
@@ -320,9 +426,10 @@ class HeartRateService : Service() {
     }
 
     private fun resetLiveSession() {
-        samples = ArrayList()
         graphPoints = ArrayList()
         graphLastAt = 0L
+        lastHeartRateAt = 0L
+        sampleCount = 0L
         sum = 0L
         min = Int.MAX_VALUE
         max = Int.MIN_VALUE
@@ -332,6 +439,9 @@ class HeartRateService : Service() {
                 connected = false,
                 deviceName = prefs.getString(KEY_NAME, "FT_38093"),
                 status = "Connecting…",
+                notificationEnabled = monitoringEnabled(),
+                overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
+                overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
             ),
         )
     }
@@ -343,8 +453,12 @@ class HeartRateService : Service() {
                 status = if (prefs.getString(KEY_ADDRESS, null).isNullOrBlank()) {
                     "Ready • scan to connect"
                 } else {
-                    "Saved watch • starting auto-connect"
+                    "Saved watch • auto-connect enabled"
                 },
+                overlayVisible = prefs.getBoolean(KEY_OVERLAY_VISIBLE, false),
+                overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
+                overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
+                notificationEnabled = monitoringEnabled(),
             ),
         )
     }
@@ -385,15 +499,19 @@ class HeartRateService : Service() {
     }
 
     private fun scheduleReconnect() {
-        if (prefs.getString(KEY_ADDRESS, null).isNullOrBlank()) return
+        if (!monitoringEnabled() || prefs.getString(KEY_ADDRESS, null).isNullOrBlank()) return
+
         reconnectRunnable?.let(handler::removeCallbacks)
         reconnectAttempt = minOf(reconnectAttempt + 1, 6)
+
         val delay = minOf(
             RECONNECT_BASE_MS * (1L shl (reconnectAttempt - 1)),
             RECONNECT_MAX_MS,
         )
+
         reconnectRunnable = Runnable { connectSavedDevice() }
         handler.postDelayed(reconnectRunnable!!, delay)
+
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
                 status = "Disconnected • reconnecting in " + (delay / 1000L) + "s",
@@ -405,6 +523,7 @@ class HeartRateService : Service() {
     private fun buildNotification(): Notification {
         val snapshot = LiveHeartRateState.snapshot.value
         val bpmText = snapshot.bpm?.let { it.toString() + " bpm" } ?: "No HR yet"
+
         val stats = buildString {
             snapshot.averageBpm?.let { append("Avg ").append(it).append(" • ") }
             snapshot.minimumBpm?.let { append("Min ").append(it).append(" • ") }
@@ -419,40 +538,56 @@ class HeartRateService : Service() {
             pendingIntentFlags(),
         )
 
-        val syncIntent = PendingIntent.getService(
-            this,
-            11,
-            Intent(this, HeartRateService::class.java).setAction(ACTION_SYNC_TIME),
-            pendingIntentFlags(),
-        )
-
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_heart_rate)
+        val builder = Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(renderNotificationIcon(snapshot.bpm))
             .setContentTitle(bpmText + " • FT_38093")
             .setContentText(stats)
             .setContentIntent(openIntent)
-            .addAction(0, "Sync time", syncIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setSilent(false)
             .setShowWhen(false)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .build()
-    }
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
 
-    private fun updateNotification() {
-        if (!runningForeground) return
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, buildNotification())
+        return builder.build()
     }
 
     private var runningForeground = false
 
+    private fun renderNotificationIcon(bpm: Int?): Icon {
+        val density = resources.displayMetrics.density
+        val size = (48f * density).toInt().coerceAtLeast(48)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ALPHA_8)
+        val canvas = Canvas(bitmap)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            typeface = Typeface.DEFAULT_BOLD
+            textAlign = Paint.Align.CENTER
+            textSize = 40f * density
+        }
+
+        val value = bpm?.toString() ?: "♥"
+        val maxWidth = size * 0.92f
+        val measured = paint.measureText(value)
+        if (measured > maxWidth) {
+            paint.textSize *= maxWidth / measured
+        }
+
+        canvas.drawText(value, size / 2f, size * 0.64f, paint)
+        return Icon.createWithBitmap(bitmap)
+    }
+
+    private fun updateNotification() {
+        if (!runningForeground || !monitoringEnabled()) return
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, buildNotification())
+    }
+
     private fun startForegroundCompat(notification: Notification) {
         if (runningForeground) {
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, notification)
             return
         }
 
@@ -465,44 +600,64 @@ class HeartRateService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+
         runningForeground = true
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Live heart rate",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = "Ongoing live FT_38093 heart-rate connection"
-            setSound(null, null)
+            val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            setSound(
+                sound,
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
             enableVibration(false)
             setShowBadge(true)
         }
+
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     private fun pendingIntentFlags(): Int =
         PendingIntent.FLAG_UPDATE_CURRENT or
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_IMMUTABLE
+            } else {
+                0
+            }
 
     private fun showOverlay() {
-        if (overlayView != null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M || !Settings.canDrawOverlays(this)) {
+        if (
+            overlayView != null ||
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            !Settings.canDrawOverlays(this)
+        ) {
             return
         }
 
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
+        val scale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f)
+        val locked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false)
+
         val text = TextView(this).apply {
             setTextColor(Color.WHITE)
-            textSize = 16f
-            setPadding(22, 12, 22, 12)
             gravity = Gravity.CENTER
+            includeFontPadding = true
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 80f
-                setColor(Color.argb(225, 16, 20, 36))
-                setStroke(2, Color.rgb(90, 220, 255))
+                cornerRadius = 80f * scale
+                setColor(Color.argb(230, 10, 16, 28))
+                setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
             }
             setOnTouchListener(OverlayDragListener(manager, this))
         }
@@ -516,20 +671,65 @@ class HeartRateService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = 24
-            y = 120
+            x = prefs.getInt(KEY_OVERLAY_X, 24)
+            y = prefs.getInt(KEY_OVERLAY_Y, 120)
         }
 
-        text.text = LiveHeartRateState.snapshot.value.bpm?.let { "$it bpm" } ?: "— bpm"
+        overlayView = text
+        overlayParams = params
+        applyOverlayStyle()
 
         runCatching {
             manager.addView(text, params)
-            overlayView = text
+        }.onFailure {
+            overlayView = null
+            overlayParams = null
         }
     }
 
-    private fun updateOverlay(bpm: Int) {
-        (overlayView as? TextView)?.text = bpm.toString() + " bpm"
+    private fun applyOverlayStyle() {
+        val view = overlayView ?: return
+        val scale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f)
+        view.textSize = (17f * scale).coerceIn(12f, 28f)
+        view.setPadding(
+            (20f * scale).roundToInt(),
+            (10f * scale).roundToInt(),
+            (20f * scale).roundToInt(),
+            (10f * scale).roundToInt(),
+        )
+        (view.background as? GradientDrawable)?.apply {
+            cornerRadius = 80f * scale
+            setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
+        }
+        updateOverlay()
+
+        val params = overlayParams ?: return
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(view, params)
+        }
+    }
+
+    private fun updateOverlay() {
+        val bpm = LiveHeartRateState.snapshot.value.bpm
+        overlayView?.text = bpm?.let { "$it bpm" } ?: "— bpm"
+    }
+
+    private fun publishOverlayState() {
+        val current = LiveHeartRateState.snapshot.value
+        LiveHeartRateState.set(
+            current.copy(
+                overlayVisible = prefs.getBoolean(KEY_OVERLAY_VISIBLE, false),
+                overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
+                overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
+            ),
+        )
+    }
+
+    private fun loadOverlayFromPrefs() {
+        publishOverlayState()
+        if (prefs.getBoolean(KEY_OVERLAY_VISIBLE, false)) {
+            showOverlay()
+        }
     }
 
     private fun hideOverlay() {
@@ -537,11 +737,47 @@ class HeartRateService : Service() {
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         runCatching { manager.removeView(view) }
         overlayView = null
+        overlayParams = null
     }
+
+    private fun stopMonitoring() {
+        reconnectRunnable?.let(handler::removeCallbacks)
+        reconnectRunnable = null
+        watchdogRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable = null
+
+        closeGatt()
+        hideOverlay()
+        if (runningForeground) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            runningForeground = false
+        }
+
+        LiveHeartRateState.set(
+            LiveHeartRateState.snapshot.value.copy(
+                connected = false,
+                timeSynced = false,
+                status = "Monitoring off",
+                notificationEnabled = false,
+                overlayVisible = false,
+            ),
+        )
+        stopSelf()
+    }
+
+    private fun monitoringEnabled(): Boolean =
+        prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
 
     override fun onDestroy() {
         reconnectRunnable?.let(handler::removeCallbacks)
+        watchdogRunnable?.let(handler::removeCallbacks)
         reconnectRunnable = null
+        watchdogRunnable = null
         hideOverlay()
         closeGatt()
         runningForeground = false
@@ -558,33 +794,40 @@ class HeartRateService : Service() {
         private var downY = 0
         private var startX = 0
         private var startY = 0
-        private var moved = false
 
         override fun onTouch(v: View, event: MotionEvent): Boolean {
+            val context = v.context
+            val locked = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_OVERLAY_LOCKED, false)
+
+            if (locked) return true
+
             val params = v.layoutParams as WindowManager.LayoutParams
+
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.rawX.toInt()
                     downY = event.rawY.toInt()
                     startX = params.x
                     startY = params.y
-                    moved = false
                     return true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX.toInt() - downX
                     val dy = event.rawY.toInt() - downY
-                    if (dx * dx + dy * dy > 36) moved = true
-                    params.x = startX - dx
-                    params.y = startY + dy
+                    params.x = (startX - dx).coerceAtLeast(0)
+                    params.y = (startY + dy).coerceAtLeast(0)
                     runCatching { manager.updateViewLayout(view, params) }
-                    return true
-                }
-                MotionEvent.ACTION_UP -> {
+                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .edit()
+                        .putInt(KEY_OVERLAY_X, params.x)
+                        .putInt(KEY_OVERLAY_Y, params.y)
+                        .apply()
                     return true
                 }
             }
-            return false
+            return true
         }
     }
 
@@ -592,27 +835,43 @@ class HeartRateService : Service() {
         const val ACTION_START = "app.watchdatasync.action.START"
         const val ACTION_CONNECT = "app.watchdatasync.action.CONNECT"
         const val ACTION_DISCONNECT = "app.watchdatasync.action.DISCONNECT"
-        const val ACTION_SYNC_TIME = "app.watchdatasync.action.SYNC_TIME"
         const val ACTION_OVERLAY_ON = "app.watchdatasync.action.OVERLAY_ON"
         const val ACTION_OVERLAY_OFF = "app.watchdatasync.action.OVERLAY_OFF"
+        const val ACTION_OVERLAY_LOCK = "app.watchdatasync.action.OVERLAY_LOCK"
+        const val ACTION_OVERLAY_SIZE = "app.watchdatasync.action.OVERLAY_SIZE"
+        const val ACTION_SET_MONITORING = "app.watchdatasync.action.SET_MONITORING"
+
         const val EXTRA_ADDRESS = "extra_address"
         const val EXTRA_NAME = "extra_name"
+        const val EXTRA_ENABLED = "extra_enabled"
+        const val EXTRA_LOCKED = "extra_locked"
+        const val EXTRA_SCALE = "extra_scale"
 
         const val PREFS = "watch_preferences"
         const val KEY_ADDRESS = "bound_watch_address"
         const val KEY_NAME = "bound_watch_name"
+        const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
+        const val KEY_OVERLAY_VISIBLE = "overlay_visible"
+        const val KEY_OVERLAY_LOCKED = "overlay_locked"
+        const val KEY_OVERLAY_SCALE = "overlay_scale"
+        const val KEY_OVERLAY_X = "overlay_x"
+        const val KEY_OVERLAY_Y = "overlay_y"
 
-        private const val CHANNEL_ID = "live_heart_rate"
+        private const val CHANNEL_ID = "live_heart_rate_v2"
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
-        private const val MAX_SESSION_SAMPLES = 1200
-        private const val MAX_GRAPH_POINTS = 300
-        private const val GRAPH_SAMPLE_MS = 1000L
+
+        private const val MAX_GRAPH_POINTS = 5400
+        private const val GRAPH_SAMPLE_MS = 2000L
+        private const val LIVE_WATCHDOG_MS = 15000L
+        private const val LIVE_STALE_MS = 45000L
+
         private const val RECONNECT_BASE_MS = 2000L
         private const val RECONNECT_MAX_MS = 30000L
 
         fun start(context: Context) {
-            val intent = Intent(context, HeartRateService::class.java).setAction(ACTION_START)
+            val intent = Intent(context, HeartRateService::class.java)
+                .setAction(ACTION_START)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
@@ -632,28 +891,53 @@ class HeartRateService : Service() {
             }
         }
 
-        fun syncTime(context: Context) {
-            context.startService(
-                Intent(context, HeartRateService::class.java).setAction(ACTION_SYNC_TIME),
-            )
-        }
-
         fun disconnect(context: Context) {
             context.startService(
-                Intent(context, HeartRateService::class.java).setAction(ACTION_DISCONNECT),
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_DISCONNECT),
             )
         }
 
         fun overlayOn(context: Context) {
             context.startService(
-                Intent(context, HeartRateService::class.java).setAction(ACTION_OVERLAY_ON),
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_OVERLAY_ON),
             )
         }
 
         fun overlayOff(context: Context) {
             context.startService(
-                Intent(context, HeartRateService::class.java).setAction(ACTION_OVERLAY_OFF),
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_OVERLAY_OFF),
             )
+        }
+
+        fun overlayLock(context: Context, locked: Boolean) {
+            context.startService(
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_OVERLAY_LOCK)
+                    .putExtra(EXTRA_LOCKED, locked),
+            )
+        }
+
+        fun overlaySize(context: Context, scale: Float) {
+            context.startService(
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_OVERLAY_SIZE)
+                    .putExtra(EXTRA_SCALE, scale),
+            )
+        }
+
+        fun setMonitoringEnabled(context: Context, enabled: Boolean) {
+            val intent = Intent(context, HeartRateService::class.java)
+                .setAction(ACTION_SET_MONITORING)
+                .putExtra(EXTRA_ENABLED, enabled)
+
+            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 }

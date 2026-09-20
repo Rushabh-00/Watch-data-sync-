@@ -3,16 +3,25 @@ package app.watchdatasync
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class HeartRatePoint(
+    val timestamp: Long,
+    val bpm: Int,
+)
+
 data class LiveHeartRateSnapshot(
     val bpm: Int? = null,
     val averageBpm: Int? = null,
     val minimumBpm: Int? = null,
     val maximumBpm: Int? = null,
-    val graph: List<Int> = emptyList(),
+    val graph: List<HeartRatePoint> = emptyList(),
     val connected: Boolean = false,
     val timeSynced: Boolean = false,
     val deviceName: String? = null,
     val status: String = "Ready",
+    val overlayVisible: Boolean = false,
+    val overlayLocked: Boolean = false,
+    val overlayScale: Float = 1f,
+    val notificationEnabled: Boolean = true,
 )
 
 object LiveHeartRateState {
@@ -21,12 +30,5 @@ object LiveHeartRateState {
 
     fun set(value: LiveHeartRateSnapshot) {
         _snapshot.value = value
-    }
-
-    fun resetForConnection(name: String?) {
-        _snapshot.value = LiveHeartRateSnapshot(
-            deviceName = name,
-            status = "Connecting…",
-        )
     }
 }
