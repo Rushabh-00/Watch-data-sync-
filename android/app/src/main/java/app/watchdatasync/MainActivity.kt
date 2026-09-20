@@ -78,12 +78,14 @@ private enum class GraphWindow(
 
 class MainActivity : ComponentActivity() {
     private lateinit var controller: BleController
+    private var timeSyncRequestedForOpen = false
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             if (hasRequiredPermissions()) {
                 if (monitoringEnabled()) {
                     HeartRateService.start(this)
+                    requestTimeSyncForCurrentOpen()
                 }
                 refreshDiscovery()
             }
@@ -176,17 +178,6 @@ class MainActivity : ComponentActivity() {
                                     it,
                                 )
                             },
-                            onKeepLiveWhenScreenOff = {
-                                LiveHeartRateState.set(
-                                    LiveHeartRateState.snapshot.value.copy(
-                                        keepLiveHrWhenScreenOff = it,
-                                    ),
-                                )
-                                HeartRateService.setKeepLiveWhenScreenOff(
-                                    this@MainActivity,
-                                    it,
-                                )
-                            },
                         )
                     }
                 }
@@ -201,6 +192,7 @@ class MainActivity : ComponentActivity() {
         if (::controller.isInitialized && hasRequiredPermissions()) {
             if (monitoringEnabled()) {
                 HeartRateService.start(this)
+                requestTimeSyncForCurrentOpen()
             }
         }
     }
@@ -221,11 +213,18 @@ class MainActivity : ComponentActivity() {
         if (missing.isEmpty()) {
             if (monitoringEnabled()) {
                 HeartRateService.start(this)
+                requestTimeSyncForCurrentOpen()
             }
             refreshDiscovery()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
         }
+    }
+
+    private fun requestTimeSyncForCurrentOpen() {
+        if (timeSyncRequestedForOpen || !monitoringEnabled()) return
+        timeSyncRequestedForOpen = true
+        HeartRateService.syncTime(this)
     }
 
     private fun hasRequiredPermissions(): Boolean =
@@ -310,7 +309,6 @@ private fun Dashboard(
     onOverlayLock: (Boolean) -> Unit,
     onOverlaySize: (Float) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
-    onKeepLiveWhenScreenOff: (Boolean) -> Unit,
 ) {
     var graphWindow by remember { mutableStateOf(GraphWindow.H5) }
     var selectedPoint by remember { mutableStateOf<HeartRatePoint?>(null) }
@@ -742,28 +740,6 @@ private fun Dashboard(
                     )
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "KEEP LIVE HR WHEN WATCH SCREEN IS OFF",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "Re-starts the verified live stream if the FT_38093 stops sending BPM packets while its display is off.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-
-                    Switch(
-                        checked = snapshot.keepLiveHrWhenScreenOff,
-                        onCheckedChange = onKeepLiveWhenScreenOff,
-                    )
-                }
-
                 Text(
                     "Notification icon follows the latest BPM without re-alerting on every sample.",
                     style = MaterialTheme.typography.labelSmall,
@@ -816,7 +792,7 @@ private fun Dashboard(
         }
 
         Text(
-            "Time is synchronized automatically after the live-HR channel connects.",
+            "Watch time sync runs when the app is opened.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
         )
