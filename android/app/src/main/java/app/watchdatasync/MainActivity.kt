@@ -174,6 +174,17 @@ class MainActivity : ComponentActivity() {
                                     it,
                                 )
                             },
+                            onKeepLiveWhenScreenOff = {
+                                LiveHeartRateState.set(
+                                    LiveHeartRateState.snapshot.value.copy(
+                                        keepLiveHrWhenScreenOff = it,
+                                    ),
+                                )
+                                HeartRateService.setKeepLiveWhenScreenOff(
+                                    this@MainActivity,
+                                    it,
+                                )
+                            },
                         )
                     }
                 }
@@ -297,13 +308,16 @@ private fun Dashboard(
     onOverlayLock: (Boolean) -> Unit,
     onOverlaySize: (Float) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
+    onKeepLiveWhenScreenOff: (Boolean) -> Unit,
 ) {
     var graphWindow by remember { mutableStateOf(GraphWindow.H5) }
     var selectedPoint by remember { mutableStateOf<HeartRatePoint?>(null) }
 
-    val now = System.currentTimeMillis()
-    val visiblePoints = snapshot.graph.filter {
-        it.timestamp >= now - graphWindow.millis
+    val visiblePoints = remember(snapshot.graph, graphWindow) {
+        val now = System.currentTimeMillis()
+        snapshot.graph.filter {
+            it.timestamp >= now - graphWindow.millis
+        }
     }
 
     LaunchedEffect(graphWindow, visiblePoints.size, snapshot.bpm) {
@@ -682,8 +696,30 @@ private fun Dashboard(
                     )
                 }
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "KEEP LIVE HR WHEN WATCH SCREEN IS OFF",
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Re-starts the verified live stream if the FT_38093 stops sending BPM packets while its display is off.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    Switch(
+                        checked = snapshot.keepLiveHrWhenScreenOff,
+                        onCheckedChange = onKeepLiveWhenScreenOff,
+                    )
+                }
+
                 Text(
-                    "Notification status icon updates with the current BPM.",
+                    "Notification icon follows the latest BPM without re-alerting on every sample.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
