@@ -1108,7 +1108,11 @@ class HeartRateService : Service() {
                 .setAction(ACTION_SET_KEEP_LIVE)
                 .putExtra(EXTRA_KEEP_LIVE, enabled)
 
-            if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val monitoring = context
+                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_NOTIFICATION_ENABLED, true)
+
+            if (enabled && monitoring && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
