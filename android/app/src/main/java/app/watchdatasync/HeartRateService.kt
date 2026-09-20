@@ -918,8 +918,9 @@ class HeartRateService : Service() {
 
         private const val MAX_GRAPH_POINTS = 5400
         private const val GRAPH_SAMPLE_MS = 2000L
-        private const val LIVE_WATCHDOG_MS = 15000L
+        private const val LIVE_WATCHDOG_MS = 60000L
         private const val LIVE_STALE_MS = 45000L
+        private const val DYNAMIC_HR_START_DELAY_MS = 1500L
 
         private const val RECONNECT_BASE_MS = 2000L
         private const val RECONNECT_MAX_MS = 30000L
