@@ -603,6 +603,7 @@ class HeartRateService : Service() {
         const val KEY_NAME = "bound_watch_name"
 
         private const val CHANNEL_ID = "live_heart_rate"
+        private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
         private const val MAX_SESSION_SAMPLES = 1200
         private const val MAX_GRAPH_POINTS = 300
