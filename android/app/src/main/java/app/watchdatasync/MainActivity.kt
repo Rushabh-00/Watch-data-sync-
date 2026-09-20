@@ -417,7 +417,7 @@ private fun Dashboard(
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF10182A),
+                containerColor = MaterialTheme.colorScheme.surface,
             ),
         ) {
             Column(
@@ -503,7 +503,7 @@ private fun Dashboard(
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF10182A),
+                containerColor = MaterialTheme.colorScheme.surface,
             ),
         ) {
             Column(
@@ -573,7 +573,7 @@ private fun Dashboard(
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF10182A),
+                containerColor = MaterialTheme.colorScheme.surface,
             ),
         ) {
             Column(
@@ -652,7 +652,7 @@ private fun Dashboard(
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
             colors = CardDefaults.cardColors(
-                containerColor = Color(0xFF10182A),
+                containerColor = MaterialTheme.colorScheme.surface,
             ),
         ) {
             Column(
@@ -845,7 +845,7 @@ private fun HeartGraph(
         }
 
         drawLine(
-            color = Color(0xFF1F2A3D),
+            color = MaterialTheme.colorScheme.outlineVariant,
             start = Offset(0f, size.height - 1f),
             end = Offset(size.width, size.height - 1f),
             strokeWidth = 2f,
