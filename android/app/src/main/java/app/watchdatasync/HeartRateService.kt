@@ -697,11 +697,24 @@ class HeartRateService : Service() {
 
         handler.postDelayed({
             if (
-                gatt === current &&
-                timeSyncRequested &&
-                monitoringEnabled()
+                gatt !== current ||
+                !timeSyncRequested ||
+                !monitoringEnabled()
             ) {
+                return@postDelayed
+            }
+
+            val service = current.getService(
+                UUID.fromString(FastrackProtocol.SERVICE_UUID),
+            )
+            val characteristic = service?.getCharacteristic(
+                UUID.fromString(FastrackProtocol.TIME_WRITE_UUID),
+            )
+
+            if (characteristic != null) {
                 syncTimeInternal()
+            } else {
+                scheduleRequestedTimeSync()
             }
         }, 350L)
     }
@@ -774,14 +787,16 @@ class HeartRateService : Service() {
         val bpmText = snapshot.bpm?.let { "$it bpm" } ?: "No HR yet"
 
         val stats = buildString {
-            snapshot.batteryPercent?.let {
-                append("Battery ").append(it).append("%")
-                if (snapshot.batteryCharging == true) append(" • Charging")
-                append(" • ")
-            }
             snapshot.averageBpm?.let { append("Avg ").append(it).append(" • ") }
             snapshot.minimumBpm?.let { append("Min ").append(it).append(" • ") }
             snapshot.maximumBpm?.let { append("Max ").append(it) }
+
+            snapshot.batteryPercent?.let {
+                if (isNotEmpty()) append(" • ")
+                append("Battery ").append(it).append("%")
+                if (snapshot.batteryCharging == true) append(" • Charging")
+            }
+
             if (isEmpty()) append(snapshot.status)
         }
 
