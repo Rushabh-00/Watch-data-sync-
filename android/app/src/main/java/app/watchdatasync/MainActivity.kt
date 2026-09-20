@@ -856,7 +856,7 @@ private fun HeartGraph(
 
         drawPath(
             path = path,
-            color = MaterialTheme.colorScheme.primary,
+            color = graphColor,
             style = Stroke(width = 4f),
         )
 
@@ -874,12 +874,12 @@ private fun HeartGraph(
                         ) * size.height
 
             drawCircle(
-                color = Color.White,
+                color = selectedColor,
                 radius = 7f,
                 center = Offset(x, y),
             )
             drawCircle(
-                color = Color(0xFF64E9FF),
+                color = graphColor,
                 radius = 4f,
                 center = Offset(x, y),
             )
