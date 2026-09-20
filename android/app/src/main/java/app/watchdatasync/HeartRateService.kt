@@ -54,6 +54,7 @@ class HeartRateService : Service() {
 
     private var overlayView: TextView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
+    private var lastOverlayValue: String? = null
 
     private val prefs by lazy {
         getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -900,6 +901,9 @@ class HeartRateService : Service() {
 
     private fun updateOverlay(bpm: Int? = LiveHeartRateState.snapshot.value.bpm) {
         val value = bpm?.let { "$it bpm" } ?: "— bpm"
+        if (value == lastOverlayValue) return
+        lastOverlayValue = value
+
         if (Looper.myLooper() == Looper.getMainLooper()) {
             overlayView?.text = value
         } else {
