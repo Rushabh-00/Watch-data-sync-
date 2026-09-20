@@ -18,6 +18,12 @@ object FastrackProtocol {
         calendar.get(Calendar.SECOND).toByte(),
     )
 
+    fun buildDynamicHeartRateModePacket(): ByteArray =
+        byteArrayOf(0xD6.toByte(), 0x02)
+
+    fun buildLiveHeartRateStartPacket(): ByteArray =
+        byteArrayOf(0xE5.toByte(), 0x11)
+
     fun decodeLiveHeartRate(packet: ByteArray): Int? {
         if (packet.size < 4) return null
         if ((packet[0].toInt() and 0xFF) != 0xE5) return null
