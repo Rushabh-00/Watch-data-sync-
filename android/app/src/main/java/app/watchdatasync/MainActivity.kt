@@ -369,9 +369,14 @@ private fun Dashboard(
         .from(context)
         .areNotificationsEnabled()
 
-    val visiblePoints = remember(snapshot.graph, graphWindow) {
+    val visiblePoints = remember(snapshot.graph, snapshot.longGraph, graphWindow) {
+        val source = if (graphWindow == GraphWindow.H24) {
+            snapshot.longGraph
+        } else {
+            snapshot.graph
+        }
         val now = System.currentTimeMillis()
-        snapshot.graph.filter {
+        source.filter {
             it.timestamp >= now - graphWindow.millis
         }
     }
