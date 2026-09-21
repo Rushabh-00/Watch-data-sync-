@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -74,6 +75,7 @@ class HeartRateService : Service() {
 
     private var overlayView: TextView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
+    private var overlayOrientation = Configuration.ORIENTATION_UNDEFINED
     private var lastOverlayValue: String? = null
 
     private val prefs by lazy {
@@ -1262,6 +1264,9 @@ class HeartRateService : Service() {
 
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         val scale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f)
+        val orientation = currentOverlayOrientation()
+        val (savedX, savedY) = loadOverlayPosition(orientation)
+        overlayOrientation = orientation
         val text = TextView(this).apply {
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -1284,8 +1289,8 @@ class HeartRateService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = prefs.getInt(KEY_OVERLAY_X, 24)
-            y = prefs.getInt(KEY_OVERLAY_Y, 120)
+            x = savedX
+            y = savedY
         }
 
         overlayView = text
@@ -1385,10 +1390,95 @@ class HeartRateService : Service() {
     private fun hideOverlay() {
         val view = overlayView ?: return
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
+        overlayParams?.let { params ->
+            if (overlayOrientation != Configuration.ORIENTATION_UNDEFINED) {
+                saveOverlayPosition(overlayOrientation, params.x, params.y)
+            }
+        }
         runCatching { manager.removeView(view) }
         overlayView = null
         overlayParams = null
+        overlayOrientation = Configuration.ORIENTATION_UNDEFINED
         lastOverlayValue = null
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+
+        val view = overlayView ?: return
+        val params = overlayParams ?: return
+        val oldOrientation = overlayOrientation
+        val newOrientation = if (
+            newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
+        ) {
+            Configuration.ORIENTATION_LANDSCAPE
+        } else {
+            Configuration.ORIENTATION_PORTRAIT
+        }
+
+        if (
+            oldOrientation == Configuration.ORIENTATION_UNDEFINED ||
+            oldOrientation == newOrientation
+        ) {
+            overlayOrientation = newOrientation
+            return
+        }
+
+        saveOverlayPosition(oldOrientation, params.x, params.y)
+
+        val (savedX, savedY) = loadOverlayPosition(newOrientation)
+        params.x = savedX
+        params.y = savedY
+        overlayOrientation = newOrientation
+
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager)
+                .updateViewLayout(view, params)
+        }
+    }
+
+    private fun currentOverlayOrientation(): Int =
+        if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            Configuration.ORIENTATION_LANDSCAPE
+        } else {
+            Configuration.ORIENTATION_PORTRAIT
+        }
+
+    private fun loadOverlayPosition(orientation: Int): Pair<Int, Int> {
+        val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
+        val xKey = if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT
+        val yKey = if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT
+
+        if (prefs.contains(xKey) && prefs.contains(yKey)) {
+            return prefs.getInt(xKey, DEFAULT_OVERLAY_X) to
+                prefs.getInt(yKey, if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT)
+        }
+
+        // Migrate the old single-position setting into the orientation active now.
+        if (prefs.contains(KEY_OVERLAY_X) || prefs.contains(KEY_OVERLAY_Y)) {
+            val legacyX = prefs.getInt(KEY_OVERLAY_X, DEFAULT_OVERLAY_X)
+            val legacyY = prefs.getInt(KEY_OVERLAY_Y, DEFAULT_OVERLAY_Y_PORTRAIT)
+            saveOverlayPosition(orientation, legacyX, legacyY)
+            return legacyX to legacyY
+        }
+
+        return DEFAULT_OVERLAY_X to
+            if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT
+    }
+
+    private fun saveOverlayPosition(
+        orientation: Int,
+        x: Int,
+        y: Int,
+    ) {
+        val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
+        val xKey = if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT
+        val yKey = if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT
+
+        prefs.edit()
+            .putInt(xKey, x)
+            .putInt(yKey, y)
+            .apply()
     }
 
     private fun stopMonitoring() {
@@ -1501,10 +1591,18 @@ class HeartRateService : Service() {
 
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL -> {
-                    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                        .edit()
-                        .putInt(KEY_OVERLAY_X, params.x)
-                        .putInt(KEY_OVERLAY_Y, params.y)
+                    val orientation = context.resources.configuration.orientation
+                    val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
+                    val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putInt(
+                            if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT,
+                            params.x,
+                        )
+                        .putInt(
+                            if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT,
+                            params.y,
+                        )
                         .apply()
                     return true
                 }
@@ -1544,6 +1642,13 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_SCALE = "overlay_scale"
         const val KEY_OVERLAY_X = "overlay_x"
         const val KEY_OVERLAY_Y = "overlay_y"
+        private const val KEY_OVERLAY_X_PORTRAIT = "overlay_x_portrait"
+        private const val KEY_OVERLAY_Y_PORTRAIT = "overlay_y_portrait"
+        private const val KEY_OVERLAY_X_LANDSCAPE = "overlay_x_landscape"
+        private const val KEY_OVERLAY_Y_LANDSCAPE = "overlay_y_landscape"
+        private const val DEFAULT_OVERLAY_X = 24
+        private const val DEFAULT_OVERLAY_Y_PORTRAIT = 120
+        private const val DEFAULT_OVERLAY_Y_LANDSCAPE = 72
 
         private const val CHANNEL_ID = "live_heart_rate_v3"
         private const val QUIET_CHANNEL_ID = "live_heart_rate_background_v2"
