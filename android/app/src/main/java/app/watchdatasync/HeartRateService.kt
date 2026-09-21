@@ -1303,6 +1303,11 @@ class HeartRateService : Service() {
             text.post {
                 overlayParams?.let { current ->
                     clampOverlayPosition(text, current)
+                    saveOverlayPosition(
+                        overlayOrientation,
+                        current.x,
+                        current.y,
+                    )
                     runCatching { manager.updateViewLayout(text, current) }
                 }
             }
@@ -1453,16 +1458,40 @@ class HeartRateService : Service() {
         view: View,
         params: WindowManager.LayoutParams,
     ) {
-        val width = resources.displayMetrics.widthPixels
-        val height = resources.displayMetrics.heightPixels
+        val metrics = resources.displayMetrics
+        val width = metrics.widthPixels
+        val height = metrics.heightPixels
 
-        // With TOP|END gravity, x is the distance from the right edge.
-        // Keep the whole overlay inside the display in both axes.
-        val maxX = (width - view.width).coerceAtLeast(0)
-        val maxY = (height - view.height).coerceAtLeast(0)
+        // TOP|END means x is measured from the right edge.
+        // The overlay window is allowed to span system-bar areas, so explicitly
+        // keep the complete BPM bubble inside a small safe region.
+        val edgeMargin = (8f * metrics.density).roundToInt()
+        val statusBarHeight = systemBarDimension("status_bar_height")
+        val navigationBarHeight = systemBarDimension("navigation_bar_height")
 
-        params.x = params.x.coerceIn(0, maxX)
-        params.y = params.y.coerceIn(0, maxY)
+        val minX = edgeMargin
+        val maxX = (width - view.width - edgeMargin).coerceAtLeast(minX)
+
+        val minY = (statusBarHeight + edgeMargin).coerceAtLeast(edgeMargin)
+        val maxY = (
+            height - navigationBarHeight - view.height - edgeMargin
+        ).coerceAtLeast(minY)
+
+        params.x = params.x.coerceIn(minX, maxX)
+        params.y = params.y.coerceIn(minY, maxY)
+    }
+
+    private fun systemBarDimension(name: String): Int {
+        val resourceId = resources.getIdentifier(
+            name,
+            "dimen",
+            "android",
+        )
+        return if (resourceId != 0) {
+            resources.getDimensionPixelSize(resourceId)
+        } else {
+            0
+        }
     }
 
     private fun currentOverlayOrientation(): Int =
