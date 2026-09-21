@@ -31,15 +31,18 @@ data class LiveHeartRateSnapshot(
 object LiveHeartRateState {
     private val _snapshot = MutableStateFlow(LiveHeartRateSnapshot())
     private val _liveBpm = MutableStateFlow<Int?>(null)
+    private val _liveBpmAt = MutableStateFlow<Long?>(null)
 
     val snapshot = _snapshot.asStateFlow()
     val liveBpm = _liveBpm.asStateFlow()
+    val liveBpmAt = _liveBpmAt.asStateFlow()
 
     fun set(value: LiveHeartRateSnapshot) {
         _snapshot.value = value
     }
 
-    fun setLiveBpm(value: Int?) {
+    fun setLiveBpm(value: Int?, atMillis: Long = System.currentTimeMillis()) {
         _liveBpm.value = value
+        _liveBpmAt.value = value?.let { atMillis }
     }
 }
