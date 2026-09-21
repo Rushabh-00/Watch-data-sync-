@@ -53,6 +53,7 @@ class HeartRateService : Service() {
 
     // Bounded in-memory ring buffer: never written to disk/database.
     private val graphPoints = ArrayDeque<HeartRatePoint>(MAX_GRAPH_POINTS)
+    private val longGraphPoints = ArrayDeque<HeartRatePoint>(MAX_LONG_GRAPH_POINTS)
     private var sampleCount = 0L
     private var sum = 0L
     private var min = Int.MAX_VALUE
@@ -591,6 +592,16 @@ class HeartRateService : Service() {
             graphChanged = true
         }
 
+        val longGraphChanged = longGraphPoints.isEmpty() ||
+            now - (longGraphPoints.peekLast()?.timestamp ?: 0L) >= LONG_GRAPH_SAMPLE_MS
+
+        if (longGraphChanged) {
+            longGraphPoints.addLast(HeartRatePoint(now, bpm))
+            if (longGraphPoints.size > MAX_LONG_GRAPH_POINTS) {
+                longGraphPoints.removeFirst()
+            }
+        }
+
         val average = (sum.toDouble() / sampleCount).roundToInt()
         val current = LiveHeartRateState.snapshot.value
 
@@ -601,6 +612,11 @@ class HeartRateService : Service() {
                 minimumBpm = min.takeIf { it != Int.MAX_VALUE },
                 maximumBpm = max.takeIf { it != Int.MIN_VALUE },
                 graph = if (graphChanged) graphPoints.toList() else current.graph,
+                longGraph = if (longGraphChanged) {
+                    longGraphPoints.toList()
+                } else {
+                    current.longGraph
+                },
                 connected = true,
                 status = "Live heart rate active",
             ),
@@ -663,6 +679,7 @@ class HeartRateService : Service() {
         pendingTimeSyncWrite = false
         timeSyncRequested = false
         graphPoints.clear()
+        longGraphPoints.clear()
         graphLastAt = 0L
         lastHeartRateAt = 0L
         connectedAt = 0L
@@ -1254,8 +1271,10 @@ class HeartRateService : Service() {
 
         // 24h × one RAM sample every 2s = 43,200 points.
         // Still bounded and RAM-only; no persistence layer is used.
-        private const val MAX_GRAPH_POINTS = 43_200
+        private const val MAX_GRAPH_POINTS = 5400
+        private const val MAX_LONG_GRAPH_POINTS = 2880
         private const val GRAPH_SAMPLE_MS = 2000L
+        private const val LONG_GRAPH_SAMPLE_MS = 30_000L
         private const val LIVE_WATCHDOG_MS = 15000L
         private const val LIVE_STALE_MS = 12000L
         private const val NOTIFICATION_UPDATE_MS = 2000L
