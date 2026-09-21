@@ -23,6 +23,7 @@ data class LiveHeartRateSnapshot(
     val overlayScale: Float = 1f,
     val backgroundMonitoringEnabled: Boolean = true,
     val notificationEnabled: Boolean = true,
+    val lowBatteryAlertEnabled: Boolean = true,
     val batteryPercent: Int? = null,
     val batteryCharging: Boolean? = null,
 )
