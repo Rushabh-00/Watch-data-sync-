@@ -565,7 +565,8 @@ private fun Dashboard(
                                     graphWindow = option
                                     selectedPoint = null
                                 },
-                                modifier = Modifier.width(56.dp),
+                                modifier = Modifier.width(66.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                             ) {
                                 Text(
                                     option.label,
@@ -580,7 +581,8 @@ private fun Dashboard(
                                     graphWindow = option
                                     selectedPoint = null
                                 },
-                                modifier = Modifier.width(56.dp),
+                                modifier = Modifier.width(66.dp),
+                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
                             ) {
                                 Text(
                                     option.label,
