@@ -29,6 +29,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.Calendar
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -73,9 +75,15 @@ class HeartRateService : Service() {
     private var min = Int.MAX_VALUE
     private var max = Int.MIN_VALUE
 
+    private enum class OverlayDisplayMode {
+        NORMAL,
+        FULLSCREEN,
+    }
+
     private var overlayView: TextView? = null
     private var overlayParams: WindowManager.LayoutParams? = null
     private var overlayOrientation = Configuration.ORIENTATION_UNDEFINED
+    private var overlayDisplayMode = OverlayDisplayMode.NORMAL
     private var lastOverlayValue: String? = null
 
     private val prefs by lazy {
@@ -199,6 +207,14 @@ class HeartRateService : Service() {
                     .coerceIn(0.70f, 1.60f)
                 prefs.edit().putFloat(KEY_OVERLAY_SCALE, scale).apply()
                 applyOverlayStyle()
+                publishOverlayState()
+            }
+            ACTION_OVERLAY_PRESET -> {
+                val preset = overlayPositionPresetFromKey(
+                    intent.getStringExtra(EXTRA_POSITION_PRESET),
+                )
+                prefs.edit().putString(KEY_OVERLAY_PRESET, preset.key).apply()
+                applyOverlayPreset(preset)
                 publishOverlayState()
             }
             ACTION_START, null -> {
@@ -882,6 +898,7 @@ class HeartRateService : Service() {
                 notificationEnabled = notificationEnabled(),
                 overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
+                overlayPreset = overlayPositionPreset().key,
             ),
         )
     }
@@ -1264,9 +1281,9 @@ class HeartRateService : Service() {
 
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         val scale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f)
-        val orientation = currentOverlayOrientation()
-        val (savedX, savedY) = loadOverlayPosition(orientation)
-        overlayOrientation = orientation
+        overlayOrientation = currentOverlayOrientation()
+        overlayDisplayMode = OverlayDisplayMode.NORMAL
+
         val text = TextView(this).apply {
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
@@ -1275,9 +1292,16 @@ class HeartRateService : Service() {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 80f * scale
                 setColor(Color.argb(48, 10, 16, 28))
-                setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
+                setStroke(
+                    (2f * scale).roundToInt().coerceAtLeast(1),
+                    Color.rgb(90, 220, 255),
+                )
             }
             setOnTouchListener(OverlayDragListener(manager, this))
+            ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+                handleOverlayWindowInsets(insets)
+                insets
+            }
         }
 
         val params = WindowManager.LayoutParams(
@@ -1288,8 +1312,6 @@ class HeartRateService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = savedX
-            y = savedY
         }
 
         overlayView = text
@@ -1299,17 +1321,7 @@ class HeartRateService : Service() {
 
         runCatching {
             manager.addView(text, params)
-            text.post {
-                overlayParams?.let { current ->
-                    clampOverlayPosition(text, current)
-                    saveOverlayPosition(
-                        overlayOrientation,
-                        current.x,
-                        current.y,
-                    )
-                    runCatching { manager.updateViewLayout(text, current) }
-                }
-            }
+            ViewCompat.requestApplyInsets(text)
         }.onFailure {
             overlayView = null
             overlayParams = null
@@ -1333,158 +1345,190 @@ class HeartRateService : Service() {
                 Color.rgb(90, 220, 255),
             )
         }
-
         updateOverlay()
-
-        val params = overlayParams ?: return
         view.post {
-            overlayParams?.let { current ->
-                clampOverlayPosition(view, current)
-                saveOverlayPosition(
-                    overlayOrientation,
-                    current.x,
-                    current.y,
-                )
-                runCatching {
-                    (getSystemService(WINDOW_SERVICE) as WindowManager)
-                        .updateViewLayout(view, current)
-                }
-            }
+            overlayParams?.let { current -> applyOverlayPosition(view, current) }
         }
+    }
+
+    private fun handleOverlayWindowInsets(insets: WindowInsetsCompat) {
+        val fullscreen =
+            !insets.isVisible(WindowInsetsCompat.Type.statusBars()) &&
+                !insets.isVisible(WindowInsetsCompat.Type.navigationBars())
+        val nextMode = if (fullscreen) {
+            OverlayDisplayMode.FULLSCREEN
+        } else {
+            OverlayDisplayMode.NORMAL
+        }
+
+        if (nextMode == overlayDisplayMode) return
+
+        val view = overlayView ?: return
+        val params = overlayParams ?: return
+        val oldMode = overlayDisplayMode
+        if (overlayPositionPreset() == OverlayPositionPreset.CUSTOM) {
+            saveOverlayPosition(overlayOrientation, oldMode, params.x, params.y)
+        }
+        overlayDisplayMode = nextMode
+        applyOverlayPosition(view, params)
+    }
+
+    private fun applyOverlayPreset(preset: OverlayPositionPreset) {
+        val view = overlayView ?: return
+        val params = overlayParams ?: return
+        if (preset == OverlayPositionPreset.CUSTOM) {
+            val (x, y) = loadOverlayPosition(overlayOrientation, overlayDisplayMode)
+            params.x = x
+            params.y = y
+        } else {
+            val (x, y) = calculatePresetPosition(view, preset)
+            params.x = x
+            params.y = y
+        }
+        clampOverlayPosition(view, params)
+        if (preset == OverlayPositionPreset.CUSTOM) {
+            saveOverlayPosition(overlayOrientation, overlayDisplayMode, params.x, params.y)
+        }
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(view, params)
+        }
+    }
+
+    private fun applyOverlayPosition(view: View, params: WindowManager.LayoutParams) {
+        val preset = overlayPositionPreset()
+        if (preset == OverlayPositionPreset.CUSTOM) {
+            val (x, y) = loadOverlayPosition(overlayOrientation, overlayDisplayMode)
+            params.x = x
+            params.y = y
+        } else {
+            val (x, y) = calculatePresetPosition(view, preset)
+            params.x = x
+            params.y = y
+        }
+        clampOverlayPosition(view, params)
+        if (preset == OverlayPositionPreset.CUSTOM) {
+            saveOverlayPosition(overlayOrientation, overlayDisplayMode, params.x, params.y)
+        }
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(view, params)
+        }
+    }
+
+    private fun calculatePresetPosition(view: View, preset: OverlayPositionPreset): Pair<Int, Int> {
+        val displayWidth = resources.displayMetrics.widthPixels
+        val displayHeight = resources.displayMetrics.heightPixels
+        val overlayWidth = view.width.takeIf { it > 0 } ?: view.measuredWidth
+        val overlayHeight = view.height.takeIf { it > 0 } ?: view.measuredHeight
+        val maxX = (displayWidth - overlayWidth).coerceAtLeast(0)
+        val maxY = (displayHeight - overlayHeight).coerceAtLeast(0)
+        val margin = (8f * resources.displayMetrics.density).roundToInt()
+        val x = when (preset) {
+            OverlayPositionPreset.TOP_LEFT, OverlayPositionPreset.BOTTOM_LEFT ->
+                (maxX - margin).coerceAtLeast(0)
+            OverlayPositionPreset.TOP_CENTER, OverlayPositionPreset.BOTTOM_CENTER -> maxX / 2
+            OverlayPositionPreset.TOP_RIGHT, OverlayPositionPreset.BOTTOM_RIGHT -> margin.coerceAtMost(maxX)
+            OverlayPositionPreset.CUSTOM -> 0
+        }
+        val y = when (preset) {
+            OverlayPositionPreset.TOP_LEFT, OverlayPositionPreset.TOP_CENTER, OverlayPositionPreset.TOP_RIGHT ->
+                margin.coerceAtMost(maxY)
+            OverlayPositionPreset.BOTTOM_LEFT, OverlayPositionPreset.BOTTOM_CENTER, OverlayPositionPreset.BOTTOM_RIGHT ->
+                (maxY - margin).coerceAtLeast(0)
+            OverlayPositionPreset.CUSTOM -> 0
+        }
+        return x to y
     }
 
     private fun updateOverlay(bpm: Int? = LiveHeartRateState.snapshot.value.bpm) {
         val value = bpm?.let { "$it bpm" } ?: "— bpm"
         if (value == lastOverlayValue) return
         lastOverlayValue = value
-
         if (Looper.myLooper() == Looper.getMainLooper()) {
             overlayView?.text = value
         } else {
-            handler.post {
-                overlayView?.text = value
-            }
+            handler.post { overlayView?.text = value }
         }
     }
 
     private fun publishMonitoringState() {
         val current = LiveHeartRateState.snapshot.value
-        LiveHeartRateState.set(
-            current.copy(
-                backgroundMonitoringEnabled = backgroundMonitoringEnabled(),
-            ),
-        )
+        LiveHeartRateState.set(current.copy(backgroundMonitoringEnabled = backgroundMonitoringEnabled()))
     }
 
     private fun publishNotificationState() {
         val current = LiveHeartRateState.snapshot.value
-        LiveHeartRateState.set(
-            current.copy(
-                notificationEnabled = notificationEnabled(),
-            ),
-        )
+        LiveHeartRateState.set(current.copy(notificationEnabled = notificationEnabled()))
     }
 
     private fun publishLowBatteryAlertState() {
         val current = LiveHeartRateState.snapshot.value
-        LiveHeartRateState.set(
-            current.copy(
-                lowBatteryAlertEnabled = lowBatteryAlertEnabled(),
-            ),
-        )
+        LiveHeartRateState.set(current.copy(lowBatteryAlertEnabled = lowBatteryAlertEnabled()))
     }
 
     private fun publishOverlayState() {
         val current = LiveHeartRateState.snapshot.value
-        LiveHeartRateState.set(
-            current.copy(
-                overlayVisible = prefs.getBoolean(KEY_OVERLAY_VISIBLE, false),
-                overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
-                overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
-            ),
-        )
+        LiveHeartRateState.set(current.copy(
+            overlayVisible = prefs.getBoolean(KEY_OVERLAY_VISIBLE, false),
+            overlayLocked = prefs.getBoolean(KEY_OVERLAY_LOCKED, false),
+            overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
+            overlayPreset = overlayPositionPreset().key,
+        ))
     }
 
     private fun loadOverlayFromPrefs() {
         publishOverlayState()
-        if (prefs.getBoolean(KEY_OVERLAY_VISIBLE, false)) {
-            showOverlay()
-        }
+        if (prefs.getBoolean(KEY_OVERLAY_VISIBLE, false)) showOverlay()
     }
 
     private fun hideOverlay() {
         val view = overlayView ?: return
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
         overlayParams?.let { params ->
-            if (overlayOrientation != Configuration.ORIENTATION_UNDEFINED) {
-                saveOverlayPosition(overlayOrientation, params.x, params.y)
+            if (overlayOrientation != Configuration.ORIENTATION_UNDEFINED &&
+                overlayPositionPreset() == OverlayPositionPreset.CUSTOM
+            ) {
+                saveOverlayPosition(overlayOrientation, overlayDisplayMode, params.x, params.y)
             }
         }
         runCatching { manager.removeView(view) }
         overlayView = null
         overlayParams = null
         overlayOrientation = Configuration.ORIENTATION_UNDEFINED
+        overlayDisplayMode = OverlayDisplayMode.NORMAL
         lastOverlayValue = null
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-
         val view = overlayView ?: return
         val params = overlayParams ?: return
         val oldOrientation = overlayOrientation
-        val newOrientation = if (
-            newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE
-        ) {
+        val newOrientation = if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
             Configuration.ORIENTATION_LANDSCAPE
         } else {
             Configuration.ORIENTATION_PORTRAIT
         }
-
-        if (
-            oldOrientation == Configuration.ORIENTATION_UNDEFINED ||
-            oldOrientation == newOrientation
-        ) {
+        if (oldOrientation == Configuration.ORIENTATION_UNDEFINED) {
             overlayOrientation = newOrientation
+            applyOverlayPosition(view, params)
             return
         }
-
-        saveOverlayPosition(oldOrientation, params.x, params.y)
-
-        val (savedX, savedY) = loadOverlayPosition(newOrientation)
-        params.x = savedX
-        params.y = savedY
-        clampOverlayPosition(view, params)
-        saveOverlayPosition(newOrientation, params.x, params.y)
-        overlayOrientation = newOrientation
-
-        runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager)
-                .updateViewLayout(view, params)
+        if (oldOrientation == newOrientation) return
+        if (overlayPositionPreset() == OverlayPositionPreset.CUSTOM) {
+            saveOverlayPosition(oldOrientation, overlayDisplayMode, params.x, params.y)
         }
+        overlayOrientation = newOrientation
+        applyOverlayPosition(view, params)
     }
 
-    private fun clampOverlayPosition(
-        view: View,
-        params: WindowManager.LayoutParams,
-    ) {
-        val metrics = resources.displayMetrics
-        val displayWidth = metrics.widthPixels
-        val displayHeight = metrics.heightPixels
-
+    private fun clampOverlayPosition(view: View, params: WindowManager.LayoutParams) {
+        val displayWidth = resources.displayMetrics.widthPixels
+        val displayHeight = resources.displayMetrics.heightPixels
         val overlayWidth = view.width.takeIf { it > 0 } ?: view.measuredWidth
         val overlayHeight = view.height.takeIf { it > 0 } ?: view.measuredHeight
-
         if (overlayWidth <= 0 || overlayHeight <= 0) return
-
-        // True edge-to-edge overlay:
-        // x/y may touch the physical display edges, but the whole BPM bubble
-        // is always kept inside the display. This behaves identically in
-        // portrait and landscape; only the saved orientation-specific position
-        // changes on rotation.
         val maxX = (displayWidth - overlayWidth).coerceAtLeast(0)
         val maxY = (displayHeight - overlayHeight).coerceAtLeast(0)
-
         params.x = params.x.coerceIn(0, maxX)
         params.y = params.y.coerceIn(0, maxY)
     }
@@ -1496,43 +1540,66 @@ class HeartRateService : Service() {
             Configuration.ORIENTATION_PORTRAIT
         }
 
-    private fun loadOverlayPosition(orientation: Int): Pair<Int, Int> {
+    private fun loadOverlayPosition(orientation: Int, displayMode: OverlayDisplayMode): Pair<Int, Int> {
         val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
-        val xKey = if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT
-        val yKey = if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT
-
-        if (prefs.contains(xKey) && prefs.contains(yKey)) {
-            return prefs.getInt(xKey, DEFAULT_OVERLAY_X) to
-                prefs.getInt(yKey, if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT)
+        val fullscreen = displayMode == OverlayDisplayMode.FULLSCREEN
+        val xKey = when {
+            landscape && fullscreen -> KEY_OVERLAY_X_LANDSCAPE_FULLSCREEN
+            landscape -> KEY_OVERLAY_X_LANDSCAPE
+            fullscreen -> KEY_OVERLAY_X_PORTRAIT_FULLSCREEN
+            else -> KEY_OVERLAY_X_PORTRAIT,
         }
-
-        // Migrate the old single-position setting into the orientation active now.
+        val yKey = when {
+            landscape && fullscreen -> KEY_OVERLAY_Y_LANDSCAPE_FULLSCREEN
+            landscape -> KEY_OVERLAY_Y_LANDSCAPE
+            fullscreen -> KEY_OVERLAY_Y_PORTRAIT_FULLSCREEN
+            else -> KEY_OVERLAY_Y_PORTRAIT,
+        }
+        if (prefs.contains(xKey) && prefs.contains(yKey)) {
+            return prefs.getInt(xKey, DEFAULT_OVERLAY_X) to prefs.getInt(
+                yKey,
+                if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT,
+            )
+        }
+        if (fullscreen) {
+            val normalXKey = if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT
+            val normalYKey = if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT
+            if (prefs.contains(normalXKey) && prefs.contains(normalYKey)) {
+                val x = prefs.getInt(normalXKey, DEFAULT_OVERLAY_X)
+                val y = prefs.getInt(
+                    normalYKey,
+                    if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT,
+                )
+                saveOverlayPosition(orientation, displayMode, x, y)
+                return x to y
+            }
+        }
         if (prefs.contains(KEY_OVERLAY_X) || prefs.contains(KEY_OVERLAY_Y)) {
             val legacyX = prefs.getInt(KEY_OVERLAY_X, DEFAULT_OVERLAY_X)
             val legacyY = prefs.getInt(KEY_OVERLAY_Y, DEFAULT_OVERLAY_Y_PORTRAIT)
-            saveOverlayPosition(orientation, legacyX, legacyY)
+            saveOverlayPosition(orientation, displayMode, legacyX, legacyY)
             return legacyX to legacyY
         }
-
-        return DEFAULT_OVERLAY_X to
-            if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT
+        return DEFAULT_OVERLAY_X to if (landscape) DEFAULT_OVERLAY_Y_LANDSCAPE else DEFAULT_OVERLAY_Y_PORTRAIT
     }
 
-    private fun saveOverlayPosition(
-        orientation: Int,
-        x: Int,
-        y: Int,
-    ) {
+    private fun saveOverlayPosition(orientation: Int, displayMode: OverlayDisplayMode, x: Int, y: Int) {
         val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
-        val xKey = if (landscape) KEY_OVERLAY_X_LANDSCAPE else KEY_OVERLAY_X_PORTRAIT
-        val yKey = if (landscape) KEY_OVERLAY_Y_LANDSCAPE else KEY_OVERLAY_Y_PORTRAIT
-
-        prefs.edit()
-            .putInt(xKey, x)
-            .putInt(yKey, y)
-            .apply()
+        val fullscreen = displayMode == OverlayDisplayMode.FULLSCREEN
+        val xKey = when {
+            landscape && fullscreen -> KEY_OVERLAY_X_LANDSCAPE_FULLSCREEN
+            landscape -> KEY_OVERLAY_X_LANDSCAPE
+            fullscreen -> KEY_OVERLAY_X_PORTRAIT_FULLSCREEN
+            else -> KEY_OVERLAY_X_PORTRAIT,
+        }
+        val yKey = when {
+            landscape && fullscreen -> KEY_OVERLAY_Y_LANDSCAPE_FULLSCREEN
+            landscape -> KEY_OVERLAY_Y_LANDSCAPE
+            fullscreen -> KEY_OVERLAY_Y_PORTRAIT_FULLSCREEN
+            else -> KEY_OVERLAY_Y_PORTRAIT,
+        }
+        prefs.edit().putInt(xKey, x).putInt(yKey, y).apply()
     }
-
     private fun stopMonitoring() {
         reconnectRunnable?.let(handler::removeCallbacks)
         reconnectRunnable = null
@@ -1569,6 +1636,9 @@ class HeartRateService : Service() {
 
     private fun notificationEnabled(): Boolean =
         prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
+
+    private fun overlayPositionPreset(): OverlayPositionPreset =
+        overlayPositionPresetFromKey(prefs.getString(KEY_OVERLAY_PRESET, null))
 
     private fun lowBatteryAlertEnabled(): Boolean =
         prefs.getBoolean(KEY_LOW_BATTERY_ALERT_ENABLED, true)
@@ -1625,6 +1695,12 @@ class HeartRateService : Service() {
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    if (overlayPositionPreset() != OverlayPositionPreset.CUSTOM) {
+                        prefs.edit()
+                            .putString(KEY_OVERLAY_PRESET, OverlayPositionPreset.CUSTOM.key)
+                            .apply()
+                        publishOverlayState()
+                    }
                     downX = event.rawX.toInt()
                     downY = event.rawY.toInt()
                     startX = params.x
@@ -1673,6 +1749,7 @@ class HeartRateService : Service() {
         const val ACTION_OVERLAY_OFF = "app.watchdatasync.action.OVERLAY_OFF"
         const val ACTION_OVERLAY_LOCK = "app.watchdatasync.action.OVERLAY_LOCK"
         const val ACTION_OVERLAY_SIZE = "app.watchdatasync.action.OVERLAY_SIZE"
+        const val ACTION_OVERLAY_PRESET = "app.watchdatasync.action.OVERLAY_PRESET"
         const val ACTION_SET_MONITORING = "app.watchdatasync.action.SET_MONITORING"
         const val ACTION_SET_NOTIFICATION = "app.watchdatasync.action.SET_NOTIFICATION"
         const val ACTION_SET_LOW_BATTERY_ALERT = "app.watchdatasync.action.SET_LOW_BATTERY_ALERT"
@@ -1683,6 +1760,7 @@ class HeartRateService : Service() {
         const val EXTRA_ENABLED = "extra_enabled"
         const val EXTRA_LOCKED = "extra_locked"
         const val EXTRA_SCALE = "extra_scale"
+        const val EXTRA_POSITION_PRESET = "extra_position_preset"
 
         const val PREFS = "watch_preferences"
         const val KEY_ADDRESS = "bound_watch_address"
@@ -1694,12 +1772,17 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_VISIBLE = "overlay_visible"
         const val KEY_OVERLAY_LOCKED = "overlay_locked"
         const val KEY_OVERLAY_SCALE = "overlay_scale"
+        private const val KEY_OVERLAY_PRESET = "overlay_preset"
         const val KEY_OVERLAY_X = "overlay_x"
         const val KEY_OVERLAY_Y = "overlay_y"
         private const val KEY_OVERLAY_X_PORTRAIT = "overlay_x_portrait"
         private const val KEY_OVERLAY_Y_PORTRAIT = "overlay_y_portrait"
         private const val KEY_OVERLAY_X_LANDSCAPE = "overlay_x_landscape"
         private const val KEY_OVERLAY_Y_LANDSCAPE = "overlay_y_landscape"
+        private const val KEY_OVERLAY_X_PORTRAIT_FULLSCREEN = "overlay_x_portrait_fullscreen"
+        private const val KEY_OVERLAY_Y_PORTRAIT_FULLSCREEN = "overlay_y_portrait_fullscreen"
+        private const val KEY_OVERLAY_X_LANDSCAPE_FULLSCREEN = "overlay_x_landscape_fullscreen"
+        private const val KEY_OVERLAY_Y_LANDSCAPE_FULLSCREEN = "overlay_y_landscape_fullscreen"
         private const val DEFAULT_OVERLAY_X = 24
         private const val DEFAULT_OVERLAY_Y_PORTRAIT = 120
         private const val DEFAULT_OVERLAY_Y_LANDSCAPE = 72
@@ -1800,6 +1883,14 @@ class HeartRateService : Service() {
                 Intent(context, HeartRateService::class.java)
                     .setAction(ACTION_OVERLAY_SIZE)
                     .putExtra(EXTRA_SCALE, scale),
+            )
+        }
+
+        fun overlayPreset(context: Context, preset: OverlayPositionPreset) {
+            context.startService(
+                Intent(context, HeartRateService::class.java)
+                    .setAction(ACTION_OVERLAY_PRESET)
+                    .putExtra(EXTRA_POSITION_PRESET, preset.key),
             )
         }
 
