@@ -75,4 +75,13 @@ class FastrackProtocolTest {
             ),
         )
     }
+    @Test
+    fun rssiQualityBandsAreStable() {
+        assertEquals("Signal —", signalQualityForRssi(null))
+        assertEquals("Excellent", signalQualityForRssi(-55))
+        assertEquals("Good", signalQualityForRssi(-67))
+        assertEquals("Fair", signalQualityForRssi(-80))
+        assertEquals("Weak", signalQualityForRssi(-81))
+    }
+
 }
