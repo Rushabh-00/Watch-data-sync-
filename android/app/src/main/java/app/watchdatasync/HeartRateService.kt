@@ -1547,13 +1547,13 @@ class HeartRateService : Service() {
             landscape && fullscreen -> KEY_OVERLAY_X_LANDSCAPE_FULLSCREEN
             landscape -> KEY_OVERLAY_X_LANDSCAPE
             fullscreen -> KEY_OVERLAY_X_PORTRAIT_FULLSCREEN
-            else -> KEY_OVERLAY_X_PORTRAIT,
+            else -> KEY_OVERLAY_X_PORTRAIT
         }
         val yKey = when {
             landscape && fullscreen -> KEY_OVERLAY_Y_LANDSCAPE_FULLSCREEN
             landscape -> KEY_OVERLAY_Y_LANDSCAPE
             fullscreen -> KEY_OVERLAY_Y_PORTRAIT_FULLSCREEN
-            else -> KEY_OVERLAY_Y_PORTRAIT,
+            else -> KEY_OVERLAY_Y_PORTRAIT
         }
         if (prefs.contains(xKey) && prefs.contains(yKey)) {
             return prefs.getInt(xKey, DEFAULT_OVERLAY_X) to prefs.getInt(
