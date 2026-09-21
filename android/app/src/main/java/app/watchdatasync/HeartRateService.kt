@@ -1471,46 +1471,22 @@ class HeartRateService : Service() {
         val metrics = resources.displayMetrics
         val displayWidth = metrics.widthPixels
         val displayHeight = metrics.heightPixels
-        val density = metrics.density
-        val edgeMargin = (8f * density).roundToInt()
 
         val overlayWidth = view.width.takeIf { it > 0 } ?: view.measuredWidth
         val overlayHeight = view.height.takeIf { it > 0 } ?: view.measuredHeight
 
         if (overlayWidth <= 0 || overlayHeight <= 0) return
 
-        val statusBarHeight = systemBarDimension("status_bar_height")
-        val navigationBarHeight = systemBarDimension("navigation_bar_height")
+        // True edge-to-edge overlay:
+        // x/y may touch the physical display edges, but the whole BPM bubble
+        // is always kept inside the display. This behaves identically in
+        // portrait and landscape; only the saved orientation-specific position
+        // changes on rotation.
+        val maxX = (displayWidth - overlayWidth).coerceAtLeast(0)
+        val maxY = (displayHeight - overlayHeight).coerceAtLeast(0)
 
-        // Gravity.TOP|END means:
-        //   x = distance from the right edge
-        //   y = distance from the top edge
-        //
-        // Clamp both offsets so the entire overlay rectangle, including its
-        // padding/stroke, always remains on-screen.
-        val minX = edgeMargin
-        val maxX = (displayWidth - overlayWidth - edgeMargin).coerceAtLeast(minX)
-
-        val minY = (statusBarHeight + edgeMargin).coerceAtLeast(edgeMargin)
-        val maxY = (
-            displayHeight - navigationBarHeight - overlayHeight - edgeMargin
-        ).coerceAtLeast(minY)
-
-        params.x = params.x.coerceIn(minX, maxX)
-        params.y = params.y.coerceIn(minY, maxY)
-    }
-
-    private fun systemBarDimension(name: String): Int {
-        val resourceId = resources.getIdentifier(
-            name,
-            "dimen",
-            "android",
-        )
-        return if (resourceId != 0) {
-            resources.getDimensionPixelSize(resourceId)
-        } else {
-            0
-        }
+        params.x = params.x.coerceIn(0, maxX)
+        params.y = params.y.coerceIn(0, maxY)
     }
 
     private fun currentOverlayOrientation(): Int =
