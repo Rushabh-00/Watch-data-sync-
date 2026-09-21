@@ -51,7 +51,8 @@ class HeartRateService : Service() {
     private var pendingTimeSyncWrite = false
     private var timeSyncRequested = false
 
-    private var graphPoints = ArrayList<HeartRatePoint>()
+    // Bounded in-memory ring buffer: never written to disk/database.
+    private val graphPoints = ArrayDeque<HeartRatePoint>(MAX_GRAPH_POINTS)
     private var sampleCount = 0L
     private var sum = 0L
     private var min = Int.MAX_VALUE
@@ -582,9 +583,9 @@ class HeartRateService : Service() {
 
         var graphChanged = false
         if (now - graphLastAt >= GRAPH_SAMPLE_MS || graphPoints.isEmpty()) {
-            graphPoints.add(HeartRatePoint(now, bpm))
+            graphPoints.addLast(HeartRatePoint(now, bpm))
             if (graphPoints.size > MAX_GRAPH_POINTS) {
-                graphPoints.removeAt(0)
+                graphPoints.removeFirst()
             }
             graphLastAt = now
             graphChanged = true
@@ -661,7 +662,7 @@ class HeartRateService : Service() {
         batteryRefreshRunnable = null
         pendingTimeSyncWrite = false
         timeSyncRequested = false
-        graphPoints = ArrayList()
+        graphPoints.clear()
         graphLastAt = 0L
         lastHeartRateAt = 0L
         connectedAt = 0L
