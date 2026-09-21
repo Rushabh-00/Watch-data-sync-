@@ -75,6 +75,7 @@ private enum class GraphWindow(
     H1("1h", 60 * 60 * 1000L),
     H2("2h", 2 * 60 * 60 * 1000L),
     H3("3h", 3 * 60 * 60 * 1000L),
+    H24("24h", 24 * 60 * 60 * 1000L),
 }
 
 class MainActivity : ComponentActivity() {
