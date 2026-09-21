@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity() {
             LiveHeartRateState.snapshot.value.copy(
                 backgroundMonitoringEnabled = initialEnabled,
                 notificationEnabled = notificationEnabled(),
+                lowBatteryAlertEnabled = lowBatteryAlertEnabled(),
             ),
         )
 
@@ -201,6 +202,17 @@ class MainActivity : ComponentActivity() {
                                 ),
                             )
                             HeartRateService.setNotificationEnabled(
+                                this@MainActivity,
+                                it,
+                            )
+                        },
+                        onLowBatteryAlertEnabled = {
+                            LiveHeartRateState.set(
+                                LiveHeartRateState.snapshot.value.copy(
+                                    lowBatteryAlertEnabled = it,
+                                ),
+                            )
+                            HeartRateService.setLowBatteryAlertEnabled(
                                 this@MainActivity,
                                 it,
                             )
@@ -330,6 +342,15 @@ class MainActivity : ComponentActivity() {
             true,
         )
 
+    private fun lowBatteryAlertEnabled(): Boolean =
+        getSharedPreferences(
+            HeartRateService.PREFS,
+            MODE_PRIVATE,
+        ).getBoolean(
+            HeartRateService.KEY_LOW_BATTERY_ALERT_ENABLED,
+            true,
+        )
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
     }
@@ -361,6 +382,7 @@ private fun Dashboard(
     onOverlaySize: (Float) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
     onNotificationEnabled: (Boolean) -> Unit,
+    onLowBatteryAlertEnabled: (Boolean) -> Unit,
     onOpenNotificationSettings: () -> Unit,
 ) {
     var graphWindow by remember { mutableStateOf(GraphWindow.H5) }
@@ -726,6 +748,13 @@ private fun Dashboard(
                     },
                     checked = snapshot.notificationEnabled,
                     onCheckedChange = onNotificationEnabled,
+                )
+
+                ControlRow(
+                    title = "Low battery alerts",
+                    subtitle = "One sound alert at 20% or below; resets above 25%.",
+                    checked = snapshot.lowBatteryAlertEnabled,
+                    onCheckedChange = onLowBatteryAlertEnabled,
                 )
 
                 if (!systemNotificationsAllowed) {
