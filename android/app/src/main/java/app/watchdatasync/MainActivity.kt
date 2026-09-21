@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 backgroundMonitoringEnabled = initialEnabled,
                 notificationEnabled = notificationEnabled(),
                 lowBatteryAlertEnabled = lowBatteryAlertEnabled(),
+                overlayPreset = overlayPositionPresetFromPrefs().key,
             ),
         )
 
@@ -173,6 +174,12 @@ class MainActivity : ComponentActivity() {
                         },
                         onOverlaySize = {
                             HeartRateService.overlaySize(
+                                this@MainActivity,
+                                it,
+                            )
+                        },
+                        onOverlayPreset = {
+                            HeartRateService.overlayPreset(
                                 this@MainActivity,
                                 it,
                             )
@@ -352,6 +359,14 @@ class MainActivity : ComponentActivity() {
             true,
         )
 
+    private fun overlayPositionPresetFromPrefs(): OverlayPositionPreset =
+        overlayPositionPresetFromKey(
+            getSharedPreferences(
+                HeartRateService.PREFS,
+                MODE_PRIVATE,
+            ).getString("overlay_preset", null),
+        )
+
     companion object {
         private const val KEY_THEME_MODE = "theme_mode"
     }
@@ -381,6 +396,7 @@ private fun Dashboard(
     onOverlayOff: () -> Unit,
     onOverlayLock: (Boolean) -> Unit,
     onOverlaySize: (Float) -> Unit,
+    onOverlayPreset: (OverlayPositionPreset) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
     onNotificationEnabled: (Boolean) -> Unit,
     onLowBatteryAlertEnabled: (Boolean) -> Unit,
@@ -731,6 +747,21 @@ private fun Dashboard(
                     onValueChange = onOverlaySize,
                     valueRange = 0.70f..1.60f,
                 )
+
+                Text(
+                    "Overlay position",
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Custom keeps separate positions for portrait, landscape, and fullscreen.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                OverlayPositionControls(
+                    selected = overlayPositionPresetFromKey(snapshot.overlayPreset),
+                    onSelected = onOverlayPreset,
+                )
             }
         }
 
@@ -789,6 +820,74 @@ private fun Dashboard(
                 .height(8.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars),
         )
+    }
+}
+
+@Composable
+private fun OverlayPositionControls(
+    selected: OverlayPositionPreset,
+    onSelected: (OverlayPositionPreset) -> Unit,
+) {
+    val rows = listOf(
+        listOf(
+            OverlayPositionPreset.TOP_LEFT,
+            OverlayPositionPreset.TOP_CENTER,
+            OverlayPositionPreset.TOP_RIGHT,
+        ),
+        listOf(
+            OverlayPositionPreset.BOTTOM_LEFT,
+            OverlayPositionPreset.BOTTOM_CENTER,
+            OverlayPositionPreset.BOTTOM_RIGHT,
+        ),
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        rows.forEach { row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                row.forEach { option ->
+                    val active = selected == option
+                    if (active) {
+                        Button(
+                            onClick = { onSelected(option) },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                        ) {
+                            Text(option.label, fontSize = 11.sp, maxLines = 1)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = { onSelected(option) },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                        ) {
+                            Text(option.label, fontSize = 11.sp, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
+
+        val custom = OverlayPositionPreset.CUSTOM
+        if (selected == custom) {
+            Button(
+                onClick = { onSelected(custom) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+            ) {
+                Text("Custom")
+            }
+        } else {
+            OutlinedButton(
+                onClick = { onSelected(custom) },
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+            ) {
+                Text("Custom")
+            }
+        }
     }
 }
 
