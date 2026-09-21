@@ -382,15 +382,15 @@ private fun Dashboard(
         }
     }
 
-    val connectedShape = RoundedCornerShape(22.dp)
+    val connectedShape = RoundedCornerShape(18.dp)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -426,7 +426,7 @@ private fun Dashboard(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(20.dp),
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
@@ -507,7 +507,7 @@ private fun Dashboard(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(18.dp),
+                    .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(
@@ -802,7 +802,8 @@ private fun Dashboard(
         }
 
         Text(
-            "Watch time sync runs when the app is opened.",
+            "Time sync: once when this app session opens.",
+
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -890,11 +891,11 @@ private fun HeartGraph(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(150.dp),
+                .height(112.dp),
         ) {
             Text(
                 "Waiting for heart-rate samples…",
-                modifier = Modifier.padding(top = 65.dp),
+                modifier = Modifier.padding(top = 44.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
