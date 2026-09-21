@@ -799,7 +799,7 @@ private fun LiveHeartRateCard(
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
-        while (kotlinx.coroutines.isActive) {
+        while (true) {
             now = System.currentTimeMillis()
             kotlinx.coroutines.delay(1000L)
         }
