@@ -1300,6 +1300,12 @@ class HeartRateService : Service() {
 
         runCatching {
             manager.addView(text, params)
+            text.post {
+                overlayParams?.let { current ->
+                    clampOverlayPosition(text, current)
+                    runCatching { manager.updateViewLayout(text, current) }
+                }
+            }
         }.onFailure {
             overlayView = null
             overlayParams = null
@@ -1319,6 +1325,10 @@ class HeartRateService : Service() {
         (view.background as? GradientDrawable)?.apply {
             cornerRadius = 80f * scale
             setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
+        }
+
+        overlayParams?.let { params ->
+            clampOverlayPosition(view, params)
         }
         updateOverlay()
 
@@ -1429,12 +1439,30 @@ class HeartRateService : Service() {
         val (savedX, savedY) = loadOverlayPosition(newOrientation)
         params.x = savedX
         params.y = savedY
+        clampOverlayPosition(view, params)
+        saveOverlayPosition(newOrientation, params.x, params.y)
         overlayOrientation = newOrientation
 
         runCatching {
             (getSystemService(WINDOW_SERVICE) as WindowManager)
                 .updateViewLayout(view, params)
         }
+    }
+
+    private fun clampOverlayPosition(
+        view: View,
+        params: WindowManager.LayoutParams,
+    ) {
+        val width = resources.displayMetrics.widthPixels
+        val height = resources.displayMetrics.heightPixels
+
+        // With TOP|END gravity, x is the distance from the right edge.
+        // Keep the whole overlay inside the display in both axes.
+        val maxX = (width - view.width).coerceAtLeast(0)
+        val maxY = (height - view.height).coerceAtLeast(0)
+
+        params.x = params.x.coerceIn(0, maxX)
+        params.y = params.y.coerceIn(0, maxY)
     }
 
     private fun currentOverlayOrientation(): Int =
@@ -1583,8 +1611,9 @@ class HeartRateService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX.toInt() - downX
                     val dy = event.rawY.toInt() - downY
-                    params.x = (startX - dx).coerceAtLeast(0)
-                    params.y = (startY + dy).coerceAtLeast(0)
+                    params.x = startX - dx
+                    params.y = startY + dy
+                    clampOverlayPosition(view, params)
                     runCatching { manager.updateViewLayout(view, params) }
                     return true
                 }
