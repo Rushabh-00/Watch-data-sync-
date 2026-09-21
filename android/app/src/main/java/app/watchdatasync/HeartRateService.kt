@@ -1252,7 +1252,9 @@ class HeartRateService : Service() {
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
 
-        private const val MAX_GRAPH_POINTS = 5400
+        // 24h × one RAM sample every 2s = 43,200 points.
+        // Still bounded and RAM-only; no persistence layer is used.
+        private const val MAX_GRAPH_POINTS = 43_200
         private const val GRAPH_SAMPLE_MS = 2000L
         private const val LIVE_WATCHDOG_MS = 15000L
         private const val LIVE_STALE_MS = 12000L
