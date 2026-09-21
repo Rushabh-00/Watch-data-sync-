@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.text.SimpleDateFormat
@@ -199,6 +201,16 @@ class MainActivity : ComponentActivity() {
                             HeartRateService.setNotificationEnabled(
                                 this@MainActivity,
                                 it,
+                            )
+                        },
+                        onOpenNotificationSettings = {
+                            startActivity(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                    putExtra(
+                                        Settings.EXTRA_APP_PACKAGE,
+                                        packageName,
+                                    )
+                                },
                             )
                         },
                     )
@@ -347,9 +359,14 @@ private fun Dashboard(
     onOverlaySize: (Float) -> Unit,
     onMonitoringEnabled: (Boolean) -> Unit,
     onNotificationEnabled: (Boolean) -> Unit,
+    onOpenNotificationSettings: () -> Unit,
 ) {
     var graphWindow by remember { mutableStateOf(GraphWindow.H5) }
     var selectedPoint by remember { mutableStateOf<HeartRatePoint?>(null) }
+    val context = LocalContext.current
+    val systemNotificationsAllowed = NotificationManagerCompat
+        .from(context)
+        .areNotificationsEnabled()
 
     val visiblePoints = remember(snapshot.graph, graphWindow) {
         val now = System.currentTimeMillis()
@@ -675,62 +692,61 @@ private fun Dashboard(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    "LIVE DISPLAY",
-                    fontWeight = FontWeight.Bold,
+                Text("CONTROLS", fontWeight = FontWeight.Bold)
+
+                ControlRow(
+                    title = "Background monitoring",
+                    subtitle = "Keeps BLE + live HR running. Off disconnects the saved watch.",
+                    checked = snapshot.backgroundMonitoringEnabled,
+                    onCheckedChange = onMonitoringEnabled,
+                )
+
+                ControlRow(
+                    title = "Notifications",
+                    subtitle = if (systemNotificationsAllowed) {
+                        if (snapshot.notificationEnabled) {
+                            "Live BPM, stats and battery."
+                        } else {
+                            "Quiet foreground notification keeps BLE alive."
+                        }
+                    } else {
+                        "Android notification permission is blocked."
+                    },
+                    checked = snapshot.notificationEnabled,
+                    onCheckedChange = onNotificationEnabled,
+                )
+
+                if (!systemNotificationsAllowed) {
+                    OutlinedButton(
+                        onClick = onOpenNotificationSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Open system notification settings")
+                    }
+                }
+
+                ControlRow(
+                    title = "Overlay",
+                    subtitle = "Remembers ON/OFF across app restarts.",
+                    checked = snapshot.overlayVisible,
+                    onCheckedChange = { enabled ->
+                        if (enabled) onOverlay() else onOverlayOff()
+                    },
+                )
+
+                ControlRow(
+                    title = "Lock overlay",
+                    subtitle = "Prevents accidental dragging.",
+                    checked = snapshot.overlayLocked,
+                    onCheckedChange = onOverlayLock,
                 )
 
                 Text(
-                    "Floating BPM pill. Hide only removes the overlay; it does not disconnect the watch or stop the notification.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Overlay",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            "Remembered across app restarts.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Switch(
-                        checked = snapshot.overlayVisible,
-                        onCheckedChange = { enabled ->
-                            if (enabled) onOverlay() else onOverlayOff()
-                        },
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Lock overlay")
-                        Text(
-                            "Prevents accidental dragging.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Switch(
-                        checked = snapshot.overlayLocked,
-                        onCheckedChange = onOverlayLock,
-                    )
-                }
-
-                Text(
-                    "Overlay size",
+                    "Overlay size • " +
+                        (snapshot.overlayScale * 100).roundToInt() + "%",
                     fontWeight = FontWeight.SemiBold,
                 )
 
@@ -739,81 +755,6 @@ private fun Dashboard(
                     onValueChange = onOverlaySize,
                     valueRange = 0.70f..1.60f,
                 )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("70%", style = MaterialTheme.typography.labelSmall)
-                    Text(
-                        (snapshot.overlayScale * 100).roundToInt().toString() + "%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text("160%", style = MaterialTheme.typography.labelSmall)
-                }
-            }
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = connectedShape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ),
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "BACKGROUND MONITORING",
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            "Off = disconnect watch. On = reconnect saved watch automatically, including after reopening the app.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    Switch(
-                        checked = snapshot.backgroundMonitoringEnabled,
-                        onCheckedChange = onMonitoringEnabled,
-                    )
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "NOTIFICATIONS",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            if (snapshot.notificationEnabled) {
-                                "Live BPM, stats and battery in the notification."
-                            } else {
-                                "Quiet background notification keeps BLE service running."
-                            },
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-
-                    Switch(
-                        checked = snapshot.notificationEnabled,
-                        onCheckedChange = onNotificationEnabled,
-                    )
-                }
             }
         }
 
@@ -870,6 +811,33 @@ private fun Dashboard(
             Modifier
                 .height(8.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars),
+        )
+    }
+}
+
+@Composable
+private fun ControlRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(
+                subtitle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
         )
     }
 }
