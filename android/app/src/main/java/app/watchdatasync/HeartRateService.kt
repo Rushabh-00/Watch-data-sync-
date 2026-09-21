@@ -599,6 +599,7 @@ class HeartRateService : Service() {
         val now = System.currentTimeMillis()
         lastHeartRateAt = now
         streamRecoveryAttempts = 0
+        LiveHeartRateState.setLiveBpm(bpm)
         sampleCount += 1
         sum += bpm
         min = minOf(min, bpm)
@@ -627,22 +628,24 @@ class HeartRateService : Service() {
         val average = (sum.toDouble() / sampleCount).roundToInt()
         val current = LiveHeartRateState.snapshot.value
 
-        LiveHeartRateState.set(
-            current.copy(
-                bpm = bpm,
-                averageBpm = average,
-                minimumBpm = min.takeIf { it != Int.MAX_VALUE },
-                maximumBpm = max.takeIf { it != Int.MIN_VALUE },
-                graph = if (graphChanged) graphPoints.toList() else current.graph,
-                longGraph = if (longGraphChanged) {
-                    longGraphPoints.toList()
-                } else {
-                    current.longGraph
-                },
-                connected = true,
-                status = "Live heart rate active",
-            ),
-        )
+        if (graphChanged || longGraphChanged) {
+            LiveHeartRateState.set(
+                current.copy(
+                    bpm = bpm,
+                    averageBpm = average,
+                    minimumBpm = min.takeIf { it != Int.MAX_VALUE },
+                    maximumBpm = max.takeIf { it != Int.MIN_VALUE },
+                    graph = if (graphChanged) graphPoints.toList() else current.graph,
+                    longGraph = if (longGraphChanged) {
+                        longGraphPoints.toList()
+                    } else {
+                        current.longGraph
+                    },
+                    connected = true,
+                    status = "Live heart rate active",
+                ),
+            )
+        }
 
         updateNotification()
         updateOverlay(bpm)
@@ -702,6 +705,7 @@ class HeartRateService : Service() {
         timeSyncRequested = false
         graphPoints.clear()
         longGraphPoints.clear()
+        LiveHeartRateState.setLiveBpm(null)
         graphLastAt = 0L
         lastHeartRateAt = 0L
         connectedAt = 0L
@@ -792,6 +796,7 @@ class HeartRateService : Service() {
         pendingTimeSyncWrite = false
         timeSyncRequested = false
         closeGatt()
+        LiveHeartRateState.setLiveBpm(null)
         connectedAt = 0L
         streamRecoveryAttempts = 0
         LiveHeartRateState.set(
@@ -835,8 +840,9 @@ class HeartRateService : Service() {
 
     private fun buildNotification(): Notification {
         val snapshot = LiveHeartRateState.snapshot.value
+        val liveBpm = LiveHeartRateState.liveBpm.value
         val notificationsOn = notificationEnabled()
-        val bpmText = snapshot.bpm?.let { "$it bpm" } ?: "No HR yet"
+        val bpmText = liveBpm?.let { "$it bpm" } ?: "No HR yet"
 
         val stats = if (!notificationsOn) {
             "Background watch connection active"
@@ -867,7 +873,7 @@ class HeartRateService : Service() {
             this,
             if (notificationsOn) CHANNEL_ID else QUIET_CHANNEL_ID,
         )
-            .setSmallIcon(renderNotificationIcon(if (notificationsOn) snapshot.bpm else null))
+            .setSmallIcon(renderNotificationIcon(if (notificationsOn) liveBpm else null))
             .setContentTitle(if (notificationsOn) bpmText else "Watch connected")
             .setContentText(stats)
             .setContentIntent(openIntent)
@@ -969,13 +975,13 @@ class HeartRateService : Service() {
         if (!runningForeground || !monitoringEnabled()) return
         if (!notificationEnabled() && !force) return
 
-        val snapshot = LiveHeartRateState.snapshot.value
+        val liveBpm = LiveHeartRateState.liveBpm.value
         val now = System.currentTimeMillis()
-        if (!force && snapshot.bpm == lastNotifiedBpm) return
+        if (!force && liveBpm == lastNotifiedBpm) return
         if (!force && now - lastNotificationAt < NOTIFICATION_UPDATE_MS) return
 
         lastNotificationAt = now
-        lastNotifiedBpm = snapshot.bpm
+        lastNotifiedBpm = liveBpm
 
         handler.post {
             if (!runningForeground || !monitoringEnabled()) return@post
