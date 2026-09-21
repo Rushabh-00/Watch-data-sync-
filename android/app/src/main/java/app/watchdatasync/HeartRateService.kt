@@ -687,7 +687,7 @@ class HeartRateService : Service() {
         lastHeartRateAt = now
         streamRecoveryAttempts = 0
         lastStreamRecoveryAt = 0L
-        LiveHeartRateState.setLiveBpm(bpm)
+        LiveHeartRateState.setLiveBpm(bpm, now)
         sampleCount += 1
         sum += bpm
         min = minOf(min, bpm)
