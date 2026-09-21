@@ -828,9 +828,9 @@ private fun GraphSelectionTooltip(
     window: GraphWindow,
 ) {
     val pattern = if (window == GraphWindow.H24) {
-        "MMM d • HH:mm:ss"
+        "MMM d • h:mm:ss a"
     } else {
-        "HH:mm:ss"
+        "h:mm:ss a"
     }
     val formatted = remember(point.timestamp, window) {
         SimpleDateFormat(pattern, Locale.getDefault()).format(Date(point.timestamp))
