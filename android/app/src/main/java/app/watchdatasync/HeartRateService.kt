@@ -1590,13 +1590,13 @@ class HeartRateService : Service() {
             landscape && fullscreen -> KEY_OVERLAY_X_LANDSCAPE_FULLSCREEN
             landscape -> KEY_OVERLAY_X_LANDSCAPE
             fullscreen -> KEY_OVERLAY_X_PORTRAIT_FULLSCREEN
-            else -> KEY_OVERLAY_X_PORTRAIT,
+            else -> KEY_OVERLAY_X_PORTRAIT
         }
         val yKey = when {
             landscape && fullscreen -> KEY_OVERLAY_Y_LANDSCAPE_FULLSCREEN
             landscape -> KEY_OVERLAY_Y_LANDSCAPE
             fullscreen -> KEY_OVERLAY_Y_PORTRAIT_FULLSCREEN
-            else -> KEY_OVERLAY_Y_PORTRAIT,
+            else -> KEY_OVERLAY_Y_PORTRAIT
         }
         prefs.edit().putInt(xKey, x).putInt(yKey, y).apply()
     }
