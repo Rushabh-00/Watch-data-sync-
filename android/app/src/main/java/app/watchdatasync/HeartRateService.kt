@@ -49,6 +49,7 @@ class HeartRateService : Service() {
     private var cachedNotificationIcon: Icon? = null
     private var lowBatteryAlerted = false
     private var batteryRefreshRunnable: Runnable? = null
+    private var rssiRefreshRunnable: Runnable? = null
     private var timeSyncRequested = false
     private var lastStreamRecoveryAt = 0L
 
@@ -110,7 +111,18 @@ class HeartRateService : Service() {
                 val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
                 prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
                 publishNotificationState()
-                refreshForegroundNotification()
+
+                if (!enabled) {
+                    lowBatteryAlerted = false
+                    prefs.edit().putBoolean(KEY_LOW_BATTERY_ALERTED, false).apply()
+                    getSystemService(NotificationManager::class.java)
+                        .cancel(LOW_BATTERY_NOTIFICATION_ID)
+                }
+
+                // Recreate the foreground notification so Android drops the old
+                // active-channel notification instead of leaving it visible.
+                refreshForegroundNotification(forceChannelSwitch = true)
+
                 if (enabled) {
                     val snapshot = LiveHeartRateState.snapshot.value
                     evaluateLowBatteryAlert(
@@ -569,10 +581,13 @@ class HeartRateService : Service() {
             }
 
             connectedAt = 0L
+            rssiRefreshRunnable?.let(handler::removeCallbacks)
+            rssiRefreshRunnable = null
 
             LiveHeartRateState.set(
                 LiveHeartRateState.snapshot.value.copy(
                     connected = false,
+                    rssi = null,
                     status = "Disconnected • reconnecting…",
                 ),
             )
@@ -620,6 +635,7 @@ class HeartRateService : Service() {
                     updateStatus("Live heart rate active")
                     requestBatteryLevel()
                     startBatteryPolling()
+                    startRssiPolling()
                     startDynamicHeartRateStream()
                 } else {
                     updateStatus("Live heart-rate setup failed")
@@ -655,6 +671,21 @@ class HeartRateService : Service() {
 
             completeBleWrite(
                 status == android.bluetooth.BluetoothGatt.GATT_SUCCESS,
+            )
+        }
+
+        override fun onReadRemoteRssi(
+            current: android.bluetooth.BluetoothGatt,
+            rssi: Int,
+            status: Int,
+        ) {
+            if (gatt !== current || status != android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                return
+            }
+
+            val snapshot = LiveHeartRateState.snapshot.value
+            LiveHeartRateState.set(
+                snapshot.copy(rssi = rssi),
             )
         }
     }
@@ -776,22 +807,57 @@ class HeartRateService : Service() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = object : Runnable {
             override fun run() {
-                if (!monitoringEnabled() || !LiveHeartRateState.snapshot.value.connected) {
+                val snapshot = LiveHeartRateState.snapshot.value
+                if (!monitoringEnabled() || !snapshot.connected) {
                     batteryRefreshRunnable = null
                     return
                 }
 
                 requestBatteryLevel()
-                handler.postDelayed(this, BATTERY_REFRESH_MS)
+
+                val delay = when {
+                    snapshot.batteryCharging == true -> BATTERY_REFRESH_CHARGING_MS
+                    (snapshot.batteryPercent ?: 100) <= LOW_BATTERY_REARM -> {
+                        BATTERY_REFRESH_LOW_MS
+                    }
+                    else -> BATTERY_REFRESH_NORMAL_MS
+                }
+                handler.postDelayed(this, delay)
             }
         }
-        handler.postDelayed(batteryRefreshRunnable!!, BATTERY_REFRESH_MS)
+        handler.post(batteryRefreshRunnable!!)
+    }
+
+    private fun startRssiPolling() {
+        rssiRefreshRunnable?.let(handler::removeCallbacks)
+        rssiRefreshRunnable = object : Runnable {
+            override fun run() {
+                if (!monitoringEnabled() || !LiveHeartRateState.snapshot.value.connected) {
+                    rssiRefreshRunnable = null
+                    return
+                }
+
+                val current = gatt
+                if (current == null) {
+                    rssiRefreshRunnable = null
+                    return
+                }
+
+                runCatching {
+                    current.readRemoteRssi()
+                }
+                handler.postDelayed(this, RSSI_REFRESH_MS)
+            }
+        }
+        handler.postDelayed(rssiRefreshRunnable!!, RSSI_INITIAL_DELAY_MS)
     }
 
 
     private fun resetLiveSession() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
+        rssiRefreshRunnable?.let(handler::removeCallbacks)
+        rssiRefreshRunnable = null
         timeSyncRequested = false
         graphPoints.clear()
         longGraphPoints.clear()
@@ -883,6 +949,8 @@ class HeartRateService : Service() {
         reconnectRunnable = null
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
+        rssiRefreshRunnable?.let(handler::removeCallbacks)
+        rssiRefreshRunnable = null
         timeSyncRequested = false
         closeGatt()
         LiveHeartRateState.setLiveBpm(null)
@@ -891,6 +959,7 @@ class HeartRateService : Service() {
         LiveHeartRateState.set(
             LiveHeartRateState.snapshot.value.copy(
                 connected = false,
+                rssi = null,
                 status = "Disconnected",
             ),
         )
@@ -900,6 +969,10 @@ class HeartRateService : Service() {
     @SuppressLint("MissingPermission")
     private fun closeGatt() {
         cancelBleWrites()
+        batteryRefreshRunnable?.let(handler::removeCallbacks)
+        batteryRefreshRunnable = null
+        rssiRefreshRunnable?.let(handler::removeCallbacks)
+        rssiRefreshRunnable = null
         val current = gatt
         gatt = null
         runCatching { current?.disconnect() }
@@ -1093,22 +1166,22 @@ class HeartRateService : Service() {
         runningForeground = true
     }
 
-    private fun refreshForegroundNotification() {
+    private fun refreshForegroundNotification(
+        forceChannelSwitch: Boolean = false,
+    ) {
         if (!runningForeground || !monitoringEnabled()) return
-        val notification = buildNotification()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        if (forceChannelSwitch) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            runningForeground = false
         }
 
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIFICATION_ID, notification)
+        startForegroundCompat(buildNotification())
     }
 
     private fun createNotificationChannels() {
@@ -1492,7 +1565,11 @@ class HeartRateService : Service() {
         private const val LIVE_WATCHDOG_MS = 15000L
         private const val LIVE_STALE_MS = 12000L
         private const val NOTIFICATION_UPDATE_MS = 2000L
-        private const val BATTERY_REFRESH_MS = 5 * 60 * 1000L
+        private const val BATTERY_REFRESH_NORMAL_MS = 10 * 60 * 1000L
+        private const val BATTERY_REFRESH_LOW_MS = 2 * 60 * 1000L
+        private const val BATTERY_REFRESH_CHARGING_MS = 15 * 60 * 1000L
+        private const val RSSI_INITIAL_DELAY_MS = 5000L
+        private const val RSSI_REFRESH_MS = 30_000L
         private const val DYNAMIC_HR_START_DELAY_MS = 1500L
         private const val NO_RESPONSE_WRITE_GAP_MS = 80L
         private const val WRITE_RESPONSE_TIMEOUT_MS = 1500L
