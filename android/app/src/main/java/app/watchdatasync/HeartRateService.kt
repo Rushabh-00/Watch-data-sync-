@@ -928,6 +928,8 @@ class HeartRateService : Service() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
         val manager = getSystemService(NotificationManager::class.java)
+        manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        manager.deleteNotificationChannel(LEGACY_QUIET_CHANNEL_ID)
 
         val activeChannel = NotificationChannel(
             CHANNEL_ID,
@@ -1243,8 +1245,10 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_X = "overlay_x"
         const val KEY_OVERLAY_Y = "overlay_y"
 
-        private const val CHANNEL_ID = "live_heart_rate_v2"
-        private const val QUIET_CHANNEL_ID = "live_heart_rate_background_v1"
+        private const val CHANNEL_ID = "live_heart_rate_v3"
+        private const val QUIET_CHANNEL_ID = "live_heart_rate_background_v2"
+        private const val LEGACY_CHANNEL_ID = "live_heart_rate_v2"
+        private const val LEGACY_QUIET_CHANNEL_ID = "live_heart_rate_background_v1"
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
 
