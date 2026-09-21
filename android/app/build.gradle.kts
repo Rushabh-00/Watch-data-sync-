@@ -11,8 +11,8 @@ android {
         applicationId = "app.watchdatasync"
         minSdk = 26
         targetSdk = 37
-        versionCode = 10
-        versionName = "1.2.7"
+        versionCode = 11
+        versionName = "1.2.8"
         resourceConfigurations += setOf("en")
     }
 
