@@ -1610,7 +1610,7 @@ class HeartRateService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private class OverlayDragListener(
+    private inner class OverlayDragListener(
         private val manager: WindowManager,
         private val view: View,
     ) : View.OnTouchListener {
