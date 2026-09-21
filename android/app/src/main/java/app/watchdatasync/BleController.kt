@@ -13,6 +13,7 @@ import android.os.Looper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlin.math.abs
 
 data class FoundWatch(
     val device: BluetoothDevice,
@@ -29,6 +30,8 @@ class BleController(context: Context) {
     private var scanner: BluetoothLeScanner? = null
     private var scanning = false
 
+    private val foundByAddress = LinkedHashMap<String, FoundWatch>()
+
     private val _devices = MutableStateFlow<List<FoundWatch>>(emptyList())
     val devices: StateFlow<List<FoundWatch>> = _devices.asStateFlow()
 
@@ -40,6 +43,7 @@ class BleController(context: Context) {
         val a = adapter ?: return
         if (!a.isEnabled) return
 
+        foundByAddress.clear()
         _devices.value = emptyList()
         scanner = a.bluetoothLeScanner
 
@@ -79,9 +83,18 @@ class BleController(context: Context) {
                 rssi = result.rssi,
             )
 
-            _devices.value =
-                (_devices.value.filterNot { it.device.address == found.device.address } + found)
-                    .sortedByDescending { it.rssi }
+            val previous = foundByAddress[found.device.address]
+            if (
+                previous != null &&
+                previous.name == found.name &&
+                abs(previous.rssi - found.rssi) < 2
+            ) {
+                return
+            }
+
+            foundByAddress[found.device.address] = found
+            _devices.value = foundByAddress.values
+                .sortedByDescending { it.rssi }
         }
 
         override fun onScanFailed(errorCode: Int) {
