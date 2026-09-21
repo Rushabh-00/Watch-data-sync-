@@ -264,10 +264,6 @@ class MainActivity : ComponentActivity() {
         }
 
         if (missing.isEmpty()) {
-            if (monitoringEnabled()) {
-                HeartRateService.start(this)
-                requestTimeSyncForCurrentOpen()
-            }
             refreshDiscovery()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
