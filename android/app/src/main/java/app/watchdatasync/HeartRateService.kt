@@ -1329,17 +1329,28 @@ class HeartRateService : Service() {
         )
         (view.background as? GradientDrawable)?.apply {
             cornerRadius = 80f * scale
-            setStroke((2f * scale).roundToInt().coerceAtLeast(1), Color.rgb(90, 220, 255))
+            setStroke(
+                (2f * scale).roundToInt().coerceAtLeast(1),
+                Color.rgb(90, 220, 255),
+            )
         }
 
-        overlayParams?.let { params ->
-            clampOverlayPosition(view, params)
-        }
         updateOverlay()
 
         val params = overlayParams ?: return
-        runCatching {
-            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(view, params)
+        view.post {
+            overlayParams?.let { current ->
+                clampOverlayPosition(view, current)
+                saveOverlayPosition(
+                    overlayOrientation,
+                    current.x,
+                    current.y,
+                )
+                runCatching {
+                    (getSystemService(WINDOW_SERVICE) as WindowManager)
+                        .updateViewLayout(view, current)
+                }
+            }
         }
     }
 
@@ -1459,22 +1470,31 @@ class HeartRateService : Service() {
         params: WindowManager.LayoutParams,
     ) {
         val metrics = resources.displayMetrics
-        val width = metrics.widthPixels
-        val height = metrics.heightPixels
+        val displayWidth = metrics.widthPixels
+        val displayHeight = metrics.heightPixels
+        val density = metrics.density
+        val edgeMargin = (8f * density).roundToInt()
 
-        // TOP|END means x is measured from the right edge.
-        // The overlay window is allowed to span system-bar areas, so explicitly
-        // keep the complete BPM bubble inside a small safe region.
-        val edgeMargin = (8f * metrics.density).roundToInt()
+        val overlayWidth = view.width.takeIf { it > 0 } ?: view.measuredWidth
+        val overlayHeight = view.height.takeIf { it > 0 } ?: view.measuredHeight
+
+        if (overlayWidth <= 0 || overlayHeight <= 0) return
+
         val statusBarHeight = systemBarDimension("status_bar_height")
         val navigationBarHeight = systemBarDimension("navigation_bar_height")
 
+        // Gravity.TOP|END means:
+        //   x = distance from the right edge
+        //   y = distance from the top edge
+        //
+        // Clamp both offsets so the entire overlay rectangle, including its
+        // padding/stroke, always remains on-screen.
         val minX = edgeMargin
-        val maxX = (width - view.width - edgeMargin).coerceAtLeast(minX)
+        val maxX = (displayWidth - overlayWidth - edgeMargin).coerceAtLeast(minX)
 
         val minY = (statusBarHeight + edgeMargin).coerceAtLeast(edgeMargin)
         val maxY = (
-            height - navigationBarHeight - view.height - edgeMargin
+            displayHeight - navigationBarHeight - overlayHeight - edgeMargin
         ).coerceAtLeast(minY)
 
         params.x = params.x.coerceIn(minX, maxX)
@@ -1649,6 +1669,7 @@ class HeartRateService : Service() {
 
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL -> {
+                    clampOverlayPosition(view, params)
                     val orientation = context.resources.configuration.orientation
                     val landscape = orientation == Configuration.ORIENTATION_LANDSCAPE
                     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
