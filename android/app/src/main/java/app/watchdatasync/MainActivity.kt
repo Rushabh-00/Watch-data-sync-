@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val snapshot by LiveHeartRateState.snapshot.collectAsStateWithLifecycle()
+            val liveBpm by LiveHeartRateState.liveBpm.collectAsStateWithLifecycle()
             val devices by controller.devices.collectAsStateWithLifecycle()
             var themeMode by remember { mutableStateOf(loadThemeMode()) }
 
@@ -121,6 +122,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Dashboard(
                         snapshot = snapshot,
+                        liveBpm = liveBpm,
                         devices = devices,
                         onScan = { refreshDiscovery(force = true) },
                         onConnect = {
@@ -370,6 +372,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard(
     snapshot: LiveHeartRateSnapshot,
+    liveBpm: Int?,
     devices: List<FoundWatch>,
     currentThemeMode: ThemeMode,
     onThemeMode: (ThemeMode) -> Unit,
@@ -468,7 +471,7 @@ private fun Dashboard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            snapshot.bpm?.toString() ?: "—",
+                            liveBpm?.toString() ?: "—",
                             style = MaterialTheme.typography.displayLarge,
                             fontWeight = FontWeight.Black,
                             color = MaterialTheme.colorScheme.primary,
