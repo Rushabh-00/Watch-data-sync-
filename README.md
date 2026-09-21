@@ -6,7 +6,7 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 
 - Saved FT_38093 device with automatic reconnect.
 - Automatic watch-time sync when the app is opened.
-- Watch battery read using the verified A2 command, refreshed automatically while connected.
+- Watch battery read using the verified A2 command, refreshed adaptively while connected (slower when charging, faster near low battery).
 - Optional low-battery alert: one sound alert at 20% or below, re-armed after the watch rises above 25%.
 - Live graph history is RAM-only: the detailed 3-hour window keeps 2-second samples, while the 24-hour overview keeps 30-second samples. Both are discarded when the monitoring session stops.
 - Background BLE monitoring through a connected-device foreground service.
@@ -18,7 +18,9 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 - Edge-to-edge full-screen UI.
 - ARM64-only release APK.
 - R8/resource shrinking for a small release APK.
-- Optional background-monitoring/notification switch.
+- Optional background-monitoring/notification switch; turning notifications off swaps to a quiet foreground connection notification so BLE monitoring can continue.
+- Connection RSSI is monitored in the background and shown as a live signal-quality indicator.
+- Graph sample selection uses a compact time/BPM tooltip.
 
 ## Live stream behavior
 
