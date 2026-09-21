@@ -14,7 +14,7 @@ Minimal FT_38093 Android companion focused on live heart rate and automatic watc
 - Current BPM, average, minimum and maximum.
 - RAM-only live graph with 5m, 10m, 30m, 1h, 2h and 3h views.
 - Tap the graph to inspect a heart-rate sample and timestamp.
-- Floating BPM overlay with drag, lock and size controls.
+- Floating BPM overlay with drag, lock and size controls, with independent portrait and landscape positions.
 - Edge-to-edge full-screen UI.
 - ARM64-only release APK.
 - R8/resource shrinking for a small release APK.
