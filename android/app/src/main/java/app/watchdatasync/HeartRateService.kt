@@ -49,7 +49,6 @@ class HeartRateService : Service() {
     private var cachedNotificationIcon: Icon? = null
     private var lowBatteryAlerted = false
     private var batteryRefreshRunnable: Runnable? = null
-    private var pendingTimeSyncWrite = false
     private var timeSyncRequested = false
     private var lastStreamRecoveryAt = 0L
 
@@ -502,7 +501,11 @@ class HeartRateService : Service() {
                     baseline > 0L &&
                     now - baseline >= LIVE_STALE_MS
 
-                if (stale) {
+                if (
+                    stale &&
+                    now - lastStreamRecoveryAt >= RECOVERY_COOLDOWN_MS
+                ) {
+                    lastStreamRecoveryAt = now
                     streamRecoveryAttempts += 1
                     when (streamRecoveryAttempts) {
                         1 -> restartDynamicHeartRateStream()
@@ -647,35 +650,12 @@ class HeartRateService : Service() {
             characteristic: android.bluetooth.BluetoothGattCharacteristic,
             status: Int,
         ) {
-            if (gatt !== current) return
+            if (gatt !== current || activeBleWrite?.gatt !== current) return
+            if (activeWriteNoResponse) return
 
-            if (
-                !characteristic.uuid.toString()
-                    .equals(FastrackProtocol.TIME_WRITE_UUID, ignoreCase = true)
-            ) {
-                return
-            }
-
-            if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
-                if (pendingTimeSyncWrite) {
-                    pendingTimeSyncWrite = false
-                    LiveHeartRateState.set(
-                        LiveHeartRateState.snapshot.value.copy(
-                            status = "Live heart rate active • time synced",
-                        ),
-                    )
-                    timeSyncRequested = false
-                    updateNotification(force = true)
-                }
-            } else {
-                pendingTimeSyncWrite = false
-                updateStatus("Time sync failed")
-                if (timeSyncRequested) {
-                    handler.postDelayed({
-                        scheduleRequestedTimeSync()
-                    }, 1000L)
-                }
-            }
+            completeBleWrite(
+                status == android.bluetooth.BluetoothGatt.GATT_SUCCESS,
+            )
         }
     }
 
@@ -706,6 +686,7 @@ class HeartRateService : Service() {
         val now = System.currentTimeMillis()
         lastHeartRateAt = now
         streamRecoveryAttempts = 0
+        lastStreamRecoveryAt = 0L
         LiveHeartRateState.setLiveBpm(bpm)
         sampleCount += 1
         sum += bpm
@@ -758,25 +739,28 @@ class HeartRateService : Service() {
         updateOverlay(bpm)
     }
 
-    @SuppressLint("MissingPermission")
     private fun syncTimeInternal() {
         val current = gatt ?: return
-        val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID)) ?: return
-        val characteristic =
-            service.getCharacteristic(UUID.fromString(FastrackProtocol.TIME_WRITE_UUID)) ?: return
+        if (!timeSyncRequested || !monitoringEnabled()) return
 
-        characteristic.writeType = android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        characteristic.value = FastrackProtocol.buildTimeSyncPacket(Calendar.getInstance())
-        pendingTimeSyncWrite = true
-
-        runCatching {
-            if (!current.writeCharacteristic(characteristic)) {
-                pendingTimeSyncWrite = false
-                updateStatus("Time write was rejected")
+        enqueueLiveCommand(
+            current,
+            FastrackProtocol.buildTimeSyncPacket(Calendar.getInstance()),
+        ) { success ->
+            if (success) {
+                LiveHeartRateState.set(
+                    LiveHeartRateState.snapshot.value.copy(
+                        status = "Live heart rate active • time synced",
+                    ),
+                )
+                timeSyncRequested = false
+                updateNotification(force = true)
+            } else if (timeSyncRequested) {
+                updateStatus("Time sync failed")
+                handler.postDelayed({
+                    scheduleRequestedTimeSync()
+                }, 1000L)
             }
-        }.onFailure {
-            pendingTimeSyncWrite = false
-            updateStatus("Time sync failed")
         }
     }
 
@@ -785,7 +769,7 @@ class HeartRateService : Service() {
         val current = gatt ?: return
         if (!LiveHeartRateState.snapshot.value.connected || !monitoringEnabled()) return
 
-        sendLiveCommand(current, FastrackProtocol.buildBatteryRequestPacket())
+        enqueueLiveCommand(current, FastrackProtocol.buildBatteryRequestPacket())
     }
 
     private fun startBatteryPolling() {
@@ -808,7 +792,6 @@ class HeartRateService : Service() {
     private fun resetLiveSession() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
-        pendingTimeSyncWrite = false
         timeSyncRequested = false
         graphPoints.clear()
         longGraphPoints.clear()
@@ -900,7 +883,6 @@ class HeartRateService : Service() {
         reconnectRunnable = null
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         batteryRefreshRunnable = null
-        pendingTimeSyncWrite = false
         timeSyncRequested = false
         closeGatt()
         LiveHeartRateState.setLiveBpm(null)
@@ -917,6 +899,7 @@ class HeartRateService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun closeGatt() {
+        cancelBleWrites()
         val current = gatt
         gatt = null
         runCatching { current?.disconnect() }
@@ -1398,7 +1381,6 @@ class HeartRateService : Service() {
         batteryRefreshRunnable?.let(handler::removeCallbacks)
         reconnectRunnable = null
         batteryRefreshRunnable = null
-        pendingTimeSyncWrite = false
         watchdogRunnable = null
         hideOverlay()
         closeGatt()
@@ -1512,6 +1494,9 @@ class HeartRateService : Service() {
         private const val NOTIFICATION_UPDATE_MS = 2000L
         private const val BATTERY_REFRESH_MS = 5 * 60 * 1000L
         private const val DYNAMIC_HR_START_DELAY_MS = 1500L
+        private const val NO_RESPONSE_WRITE_GAP_MS = 80L
+        private const val WRITE_RESPONSE_TIMEOUT_MS = 1500L
+        private const val RECOVERY_COOLDOWN_MS = 20_000L
 
         private const val RECONNECT_BASE_MS = 2000L
         private const val RECONNECT_MAX_MS = 30000L
