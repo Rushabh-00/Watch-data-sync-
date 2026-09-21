@@ -96,9 +96,7 @@ class HeartRateService : Service() {
                 val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
                 prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
                 publishNotificationState()
-                if (runningForeground) {
-                    startForegroundCompat(buildNotification())
-                }
+                refreshForegroundNotification()
             }
 
             ACTION_SET_MONITORING -> {
@@ -834,6 +832,7 @@ class HeartRateService : Service() {
             .setContentIntent(openIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
+            .setSilent(!notificationsOn)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
@@ -895,18 +894,21 @@ class HeartRateService : Service() {
     }
 
     private fun startForegroundCompat(notification: Notification) {
-        if (runningForeground) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
-            return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
         }
+        runningForeground = true
+    }
+
+    private fun refreshForegroundNotification() {
+        if (!runningForeground || !monitoringEnabled()) return
+        val notification = buildNotification()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -918,7 +920,8 @@ class HeartRateService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
-        runningForeground = true
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIFICATION_ID, notification)
     }
 
     private fun createNotificationChannels() {
