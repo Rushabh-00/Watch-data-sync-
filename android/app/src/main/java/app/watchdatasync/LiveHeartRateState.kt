@@ -3,6 +3,23 @@ package app.watchdatasync
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+enum class OverlayPositionPreset(
+    val key: String,
+    val label: String,
+) {
+    CUSTOM("custom", "Custom"),
+    TOP_LEFT("top_left", "Left top"),
+    TOP_CENTER("top_center", "Center top"),
+    TOP_RIGHT("top_right", "Right top"),
+    BOTTOM_LEFT("bottom_left", "Left bottom"),
+    BOTTOM_CENTER("bottom_center", "Center bottom"),
+    BOTTOM_RIGHT("bottom_right", "Right bottom"),
+}
+
+fun overlayPositionPresetFromKey(key: String?): OverlayPositionPreset =
+    OverlayPositionPreset.entries.firstOrNull { it.key == key }
+        ?: OverlayPositionPreset.CUSTOM
+
 data class HeartRatePoint(
     val timestamp: Long,
     val bpm: Int,
@@ -21,6 +38,7 @@ data class LiveHeartRateSnapshot(
     val overlayVisible: Boolean = false,
     val overlayLocked: Boolean = false,
     val overlayScale: Float = 1f,
+    val overlayPreset: String = OverlayPositionPreset.CUSTOM.key,
     val backgroundMonitoringEnabled: Boolean = true,
     val notificationEnabled: Boolean = true,
     val lowBatteryAlertEnabled: Boolean = true,
