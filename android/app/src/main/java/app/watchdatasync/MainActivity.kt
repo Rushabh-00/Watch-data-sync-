@@ -451,6 +451,7 @@ private fun Dashboard(
                     "Live heart rate • auto time sync • background BLE",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                ConnectionStatusPill(snapshot)
             }
         }
 
@@ -488,17 +489,10 @@ private fun Dashboard(
                     )
                 }
 
-                if (selectedPoint != null) {
-                    val formatted = remember(selectedPoint!!.timestamp) {
-                        SimpleDateFormat(
-                            "HH:mm:ss",
-                            Locale.getDefault(),
-                        ).format(Date(selectedPoint!!.timestamp))
-                    }
-                    Text(
-                        "Selected • " + selectedPoint!!.bpm + " bpm • " + formatted,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
+                selectedPoint?.let { point ->
+                    GraphSelectionTooltip(
+                        point = point,
+                        window = graphWindow,
                     )
                 }
 
@@ -597,13 +591,23 @@ private fun Dashboard(
                         )
                     }
 
-                    Text(
-                        "BATTERY " + (snapshot.batteryPercent?.let { "$it%" } ?: "—"),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                    )
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                        Text(
+                            "BATTERY " + (snapshot.batteryPercent?.let { "$it%" } ?: "—"),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                        )
+                        Text(
+                            snapshot.rssi?.let {
+                                "SIGNAL $it dBm • " + signalQualityForRssi(it)
+                            } ?: "SIGNAL —",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -785,6 +789,73 @@ private fun Dashboard(
                 .height(8.dp)
                 .windowInsetsPadding(WindowInsets.navigationBars),
         )
+    }
+}
+
+@Composable
+private fun ConnectionStatusPill(
+    snapshot: LiveHeartRateSnapshot,
+) {
+    val text = when {
+        snapshot.connected -> snapshot.rssi?.let {
+            "● LIVE • $it dBm • " + signalQualityForRssi(it)
+        } ?: "● CONNECTED"
+        snapshot.deviceName != null -> "○ CONNECTING"
+        else -> "○ READY"
+    }
+
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = if (snapshot.connected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+@Composable
+private fun GraphSelectionTooltip(
+    point: HeartRatePoint,
+    window: GraphWindow,
+) {
+    val pattern = if (window == GraphWindow.H24) {
+        "MMM d • HH:mm:ss"
+    } else {
+        "HH:mm:ss"
+    }
+    val formatted = remember(point.timestamp, window) {
+        SimpleDateFormat(pattern, Locale.getDefault()).format(Date(point.timestamp))
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                point.bpm.toString() + " BPM",
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                formatted,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
     }
 }
 
