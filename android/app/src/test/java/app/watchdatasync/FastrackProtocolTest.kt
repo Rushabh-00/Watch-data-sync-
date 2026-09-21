@@ -84,4 +84,24 @@ class FastrackProtocolTest {
         assertEquals("Weak", signalQualityForRssi(-81))
     }
 
+    @Test
+    fun overlayPresetFallsBackToCustomForUnknownKey() {
+        assertEquals(
+            OverlayPositionPreset.CUSTOM,
+            overlayPositionPresetFromKey(null),
+        )
+        assertEquals(
+            OverlayPositionPreset.CUSTOM,
+            overlayPositionPresetFromKey("unknown"),
+        )
+        assertEquals(
+            OverlayPositionPreset.TOP_CENTER,
+            overlayPositionPresetFromKey("top_center"),
+        )
+        assertEquals(
+            OverlayPositionPreset.BOTTOM_RIGHT,
+            overlayPositionPresetFromKey("bottom_right"),
+        )
+    }
+
 }
