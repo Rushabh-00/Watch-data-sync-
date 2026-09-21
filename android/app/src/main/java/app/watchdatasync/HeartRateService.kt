@@ -47,6 +47,7 @@ class HeartRateService : Service() {
     private var lastNotifiedBpm: Int? = null
     private var cachedNotificationBpm: Int? = Int.MIN_VALUE
     private var cachedNotificationIcon: Icon? = null
+    private var lowBatteryAlerted = false
     private var batteryRefreshRunnable: Runnable? = null
     private var pendingTimeSyncWrite = false
     private var timeSyncRequested = false
@@ -99,6 +100,26 @@ class HeartRateService : Service() {
                 prefs.edit().putBoolean(KEY_NOTIFICATION_ENABLED, enabled).apply()
                 publishNotificationState()
                 refreshForegroundNotification()
+                if (enabled) {
+                    val snapshot = LiveHeartRateState.snapshot.value
+                    evaluateLowBatteryAlert(
+                        snapshot.batteryPercent,
+                        snapshot.batteryCharging,
+                    )
+                }
+            }
+
+            ACTION_SET_LOW_BATTERY_ALERT -> {
+                val enabled = intent.getBooleanExtra(EXTRA_ENABLED, true)
+                prefs.edit().putBoolean(KEY_LOW_BATTERY_ALERT_ENABLED, enabled).apply()
+                publishLowBatteryAlertState()
+                if (enabled) {
+                    val snapshot = LiveHeartRateState.snapshot.value
+                    evaluateLowBatteryAlert(
+                        snapshot.batteryPercent,
+                        snapshot.batteryCharging,
+                    )
+                }
             }
 
             ACTION_SET_MONITORING -> {
@@ -564,6 +585,7 @@ class HeartRateService : Service() {
                         batteryCharging = battery.charging,
                     ),
                 )
+                evaluateLowBatteryAlert(battery.percent, battery.charging)
                 updateNotification(force = true)
             }
         }
@@ -716,6 +738,7 @@ class HeartRateService : Service() {
                 overlayScale = prefs.getFloat(KEY_OVERLAY_SCALE, 1f),
                 backgroundMonitoringEnabled = backgroundMonitoringEnabled(),
                 notificationEnabled = notificationEnabled(),
+                lowBatteryAlertEnabled = lowBatteryAlertEnabled(),
             ),
         )
     }
@@ -859,6 +882,57 @@ class HeartRateService : Service() {
 
     private var runningForeground = false
 
+    private fun evaluateLowBatteryAlert(percent: Int?, charging: Boolean?) {
+        if (percent == null) return
+
+        if (percent > LOW_BATTERY_REARM) {
+            if (lowBatteryAlerted) {
+                lowBatteryAlerted = false
+                prefs.edit().putBoolean(KEY_LOW_BATTERY_ALERTED, false).apply()
+            }
+            return
+        }
+
+        if (
+            percent > LOW_BATTERY_THRESHOLD ||
+            charging == true ||
+            !lowBatteryAlertEnabled() ||
+            !notificationEnabled() ||
+            lowBatteryAlerted ||
+            !androidx.core.app.NotificationManagerCompat.from(this).areNotificationsEnabled()
+        ) {
+            return
+        }
+
+        lowBatteryAlerted = true
+        prefs.edit().putBoolean(KEY_LOW_BATTERY_ALERTED, true).apply()
+
+        val openIntent = PendingIntent.getActivity(
+            this,
+            LOW_BATTERY_NOTIFICATION_ID,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            pendingIntentFlags(),
+        )
+
+        val notification = Notification.Builder(this, LOW_BATTERY_CHANNEL_ID)
+            .setSmallIcon(renderNotificationIcon(null))
+            .setContentTitle("Watch battery low")
+            .setContentText(
+                "FT_38093 battery is $percent%. Charge the watch soon.",
+            )
+            .setContentIntent(openIntent)
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(true)
+            .setCategory(Notification.CATEGORY_SYSTEM)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .build()
+
+        getSystemService(NotificationManager::class.java)
+            .notify(LOW_BATTERY_NOTIFICATION_ID, notification)
+    }
+
     private fun renderNotificationIcon(bpm: Int?): Icon {
         if (cachedNotificationBpm == bpm && cachedNotificationIcon != null) {
             return cachedNotificationIcon!!
@@ -966,6 +1040,24 @@ class HeartRateService : Service() {
             setShowBadge(true)
         }
 
+        val lowBatteryChannel = NotificationChannel(
+            LOW_BATTERY_CHANNEL_ID,
+            "Low battery alerts",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "One-time alert when watch battery falls to 20% or below"
+            val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            setSound(
+                sound,
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            enableVibration(false)
+            setShowBadge(true)
+        }
+
         val quietChannel = NotificationChannel(
             QUIET_CHANNEL_ID,
             "Background connection",
@@ -977,7 +1069,9 @@ class HeartRateService : Service() {
             setShowBadge(false)
         }
 
-        manager.createNotificationChannels(listOf(activeChannel, quietChannel))
+        manager.createNotificationChannels(
+            listOf(activeChannel, quietChannel, lowBatteryChannel),
+        )
     }
 
     private fun pendingIntentFlags(): Int =
@@ -1092,6 +1186,15 @@ class HeartRateService : Service() {
         )
     }
 
+    private fun publishLowBatteryAlertState() {
+        val current = LiveHeartRateState.snapshot.value
+        LiveHeartRateState.set(
+            current.copy(
+                lowBatteryAlertEnabled = lowBatteryAlertEnabled(),
+            ),
+        )
+    }
+
     private fun publishOverlayState() {
         val current = LiveHeartRateState.snapshot.value
         LiveHeartRateState.set(
@@ -1156,7 +1259,16 @@ class HeartRateService : Service() {
     private fun notificationEnabled(): Boolean =
         prefs.getBoolean(KEY_NOTIFICATION_ENABLED, true)
 
+    private fun lowBatteryAlertEnabled(): Boolean =
+        prefs.getBoolean(KEY_LOW_BATTERY_ALERT_ENABLED, true)
+
     private fun migratePreferences() {
+        if (!prefs.contains(KEY_LOW_BATTERY_ALERT_ENABLED)) {
+            prefs.edit().putBoolean(KEY_LOW_BATTERY_ALERT_ENABLED, true).apply()
+        }
+
+        lowBatteryAlerted = prefs.getBoolean(KEY_LOW_BATTERY_ALERTED, false)
+
         if (!prefs.contains(KEY_BACKGROUND_MONITORING_ENABLED)) {
             prefs.edit()
                 .putBoolean(
@@ -1243,6 +1355,7 @@ class HeartRateService : Service() {
         const val ACTION_OVERLAY_SIZE = "app.watchdatasync.action.OVERLAY_SIZE"
         const val ACTION_SET_MONITORING = "app.watchdatasync.action.SET_MONITORING"
         const val ACTION_SET_NOTIFICATION = "app.watchdatasync.action.SET_NOTIFICATION"
+        const val ACTION_SET_LOW_BATTERY_ALERT = "app.watchdatasync.action.SET_LOW_BATTERY_ALERT"
         const val ACTION_SYNC_TIME = "app.watchdatasync.action.SYNC_TIME"
 
         const val EXTRA_ADDRESS = "extra_address"
@@ -1256,6 +1369,8 @@ class HeartRateService : Service() {
         const val KEY_NAME = "bound_watch_name"
         const val KEY_BACKGROUND_MONITORING_ENABLED = "background_monitoring_enabled"
         const val KEY_NOTIFICATION_ENABLED = "notification_enabled"
+        const val KEY_LOW_BATTERY_ALERT_ENABLED = "low_battery_alert_enabled"
+        private const val KEY_LOW_BATTERY_ALERTED = "low_battery_alerted"
         const val KEY_OVERLAY_VISIBLE = "overlay_visible"
         const val KEY_OVERLAY_LOCKED = "overlay_locked"
         const val KEY_OVERLAY_SCALE = "overlay_scale"
@@ -1264,10 +1379,14 @@ class HeartRateService : Service() {
 
         private const val CHANNEL_ID = "live_heart_rate_v3"
         private const val QUIET_CHANNEL_ID = "live_heart_rate_background_v2"
+        private const val LOW_BATTERY_CHANNEL_ID = "watch_battery_alerts_v1"
         private const val LEGACY_CHANNEL_ID = "live_heart_rate_v2"
         private const val LEGACY_QUIET_CHANNEL_ID = "live_heart_rate_background_v1"
         private const val CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
         private const val NOTIFICATION_ID = 4101
+        private const val LOW_BATTERY_NOTIFICATION_ID = 4102
+        private const val LOW_BATTERY_THRESHOLD = 20
+        private const val LOW_BATTERY_REARM = 25
 
         // 24h × one RAM sample every 2s = 43,200 points.
         // Still bounded and RAM-only; no persistence layer is used.
@@ -1348,6 +1467,14 @@ class HeartRateService : Service() {
                     .setAction(ACTION_OVERLAY_SIZE)
                     .putExtra(EXTRA_SCALE, scale),
             )
+        }
+
+        fun setLowBatteryAlertEnabled(context: Context, enabled: Boolean) {
+            val intent = Intent(context, HeartRateService::class.java)
+                .setAction(ACTION_SET_LOW_BATTERY_ALERT)
+                .putExtra(EXTRA_ENABLED, enabled)
+
+            context.startService(intent)
         }
 
         fun setNotificationEnabled(context: Context, enabled: Boolean) {
