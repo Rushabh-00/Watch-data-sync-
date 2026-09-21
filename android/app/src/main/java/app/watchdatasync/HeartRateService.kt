@@ -1772,7 +1772,7 @@ class HeartRateService : Service() {
         const val KEY_OVERLAY_VISIBLE = "overlay_visible"
         const val KEY_OVERLAY_LOCKED = "overlay_locked"
         const val KEY_OVERLAY_SCALE = "overlay_scale"
-        private const val KEY_OVERLAY_PRESET = "overlay_preset"
+        const val KEY_OVERLAY_PRESET = "overlay_preset"
         const val KEY_OVERLAY_X = "overlay_x"
         const val KEY_OVERLAY_Y = "overlay_y"
         private const val KEY_OVERLAY_X_PORTRAIT = "overlay_x_portrait"
