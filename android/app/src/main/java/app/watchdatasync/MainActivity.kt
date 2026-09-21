@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -111,7 +112,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val snapshot by LiveHeartRateState.snapshot.collectAsStateWithLifecycle()
-            val liveBpm by LiveHeartRateState.liveBpm.collectAsStateWithLifecycle()
             val devices by controller.devices.collectAsStateWithLifecycle()
             var themeMode by remember { mutableStateOf(loadThemeMode()) }
 
@@ -122,7 +122,6 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Dashboard(
                         snapshot = snapshot,
-                        liveBpm = liveBpm,
                         devices = devices,
                         onScan = { refreshDiscovery(force = true) },
                         onConnect = {
@@ -193,9 +192,6 @@ class MainActivity : ComponentActivity() {
                                 this@MainActivity,
                                 it,
                             )
-                            if (it) {
-                                requestTimeSyncForCurrentOpen()
-                            }
                         },
                         onNotificationEnabled = {
                             LiveHeartRateState.set(
@@ -237,14 +233,21 @@ class MainActivity : ComponentActivity() {
         requestPermissionsIfNeeded()
     }
 
-    override fun onResume() {
-        super.onResume()
+    override fun onStart() {
+        super.onStart()
+        timeSyncRequestedForOpen = false
+
         if (::controller.isInitialized && hasRequiredPermissions()) {
             if (monitoringEnabled()) {
                 HeartRateService.start(this)
                 requestTimeSyncForCurrentOpen()
             }
         }
+    }
+
+    override fun onStop() {
+        timeSyncRequestedForOpen = false
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -372,7 +375,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard(
     snapshot: LiveHeartRateSnapshot,
-    liveBpm: Int?,
     devices: List<FoundWatch>,
     currentThemeMode: ThemeMode,
     onThemeMode: (ThemeMode) -> Unit,
@@ -407,7 +409,15 @@ private fun Dashboard(
         }
     }
 
-    LaunchedEffect(graphWindow, visiblePoints.size, snapshot.bpm) {
+    val displayPoints = remember(visiblePoints, graphWindow) {
+        if (graphWindow == GraphWindow.H24) {
+            downsampleHeartRatePoints(visiblePoints, 720)
+        } else {
+            visiblePoints
+        }
+    }
+
+    LaunchedEffect(graphWindow, displayPoints.size) {
         val selected = selectedPoint
         if (selected != null && visiblePoints.none { it.timestamp == selected.timestamp }) {
             selectedPoint = null
@@ -448,86 +458,11 @@ private fun Dashboard(
             }
         }
 
-        Card(
+        LiveHeartRateCard(
+            snapshot = snapshot,
             modifier = Modifier.fillMaxWidth(),
             shape = connectedShape,
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface,
-            ),
-        ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column {
-                        Text(
-                            "LIVE HEART RATE",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            liveBpm?.toString() ?: "—",
-                            style = MaterialTheme.typography.displayLarge,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            "BPM",
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-
-                    Column(
-                        horizontalAlignment = androidx.compose.ui.Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            if (snapshot.connected) "● LIVE" else "○ OFFLINE",
-                            color = if (snapshot.connected) {
-                                Color(0xFF5DFFB2)
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            snapshot.deviceName ?: "No saved watch",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                        val batteryText = buildString {
-                            append("Battery ")
-                            append(snapshot.batteryPercent?.let { "$it%" } ?: "—")
-                            if (snapshot.batteryCharging == true) append(" • Charging")
-                        }
-                        Text(
-                            batteryText,
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                        )
-                    }
-                }
-
-                Text(
-                    snapshot.status,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    StatPill("AVG", snapshot.averageBpm)
-                    StatPill("MIN", snapshot.minimumBpm)
-                    StatPill("MAX", snapshot.maximumBpm)
-                }
-            }
-        }
+        )
 
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -572,7 +507,7 @@ private fun Dashboard(
                 }
 
                 HeartGraph(
-                    points = visiblePoints,
+                    points = displayPoints,
                     selectedPoint = selectedPoint,
                     onPointSelected = { selectedPoint = it },
                 )
@@ -855,6 +790,155 @@ private fun Dashboard(
                 .windowInsetsPadding(WindowInsets.navigationBars),
         )
     }
+}
+
+@Composable
+private fun LiveHeartRateCard(
+    snapshot: LiveHeartRateSnapshot,
+    modifier: Modifier,
+    shape: RoundedCornerShape,
+) {
+    val liveBpm by LiveHeartRateState.liveBpm.collectAsStateWithLifecycle()
+    val liveBpmAt by LiveHeartRateState.liveBpmAt.collectAsStateWithLifecycle()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (kotlinx.coroutines.isActive) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
+
+    val freshnessText = when {
+        !snapshot.connected -> "○ OFFLINE"
+        liveBpmAt == null -> "○ WAITING FOR HR"
+        else -> {
+            val seconds = ((now - liveBpmAt!!).coerceAtLeast(0L) / 1000L)
+            if (seconds <= 3L) "● LIVE • ${seconds}s"
+            else "● LIVE • ${seconds}s ago"
+        }
+    }
+
+    Card(
+        modifier = modifier,
+        shape = shape,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        "LIVE HEART RATE",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        liveBpm?.toString() ?: "—",
+                        style = MaterialTheme.typography.displayLarge,
+                        fontWeight = FontWeight.Black,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        "BPM",
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Column(
+                    horizontalAlignment = androidx.compose.ui.Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        freshnessText,
+                        color = if (liveBpmAt != null && snapshot.connected) {
+                            Color(0xFF5DFFB2)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        snapshot.deviceName ?: "No saved watch",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    val batteryText = buildString {
+                        append("Battery ")
+                        append(snapshot.batteryPercent?.let { "$it%" } ?: "—")
+                        if (snapshot.batteryCharging == true) append(" • Charging")
+                    }
+                    Text(
+                        batteryText,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            Text(
+                snapshot.status,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                StatPill("AVG", snapshot.averageBpm)
+                StatPill("MIN", snapshot.minimumBpm)
+                StatPill("MAX", snapshot.maximumBpm)
+            }
+        }
+    }
+}
+
+private fun downsampleHeartRatePoints(
+    points: List<HeartRatePoint>,
+    targetCount: Int,
+): List<HeartRatePoint> {
+    if (points.size <= targetCount) return points
+
+    val bucketSize = points.size.toDouble() / targetCount
+    val result = ArrayList<HeartRatePoint>(targetCount * 2)
+
+    for (bucket in 0 until targetCount) {
+        val start = (bucket * bucketSize).toInt()
+        val end = ((bucket + 1) * bucketSize).toInt()
+            .coerceAtMost(points.size)
+        if (start >= end) continue
+
+        var minPoint = points[start]
+        var maxPoint = points[start]
+
+        for (index in start + 1 until end) {
+            val point = points[index]
+            if (point.bpm < minPoint.bpm) minPoint = point
+            if (point.bpm > maxPoint.bpm) maxPoint = point
+        }
+
+        if (minPoint.timestamp <= maxPoint.timestamp) {
+            result.add(minPoint)
+            if (maxPoint.timestamp != minPoint.timestamp) {
+                result.add(maxPoint)
+            }
+        } else {
+            result.add(maxPoint)
+            if (maxPoint.timestamp != minPoint.timestamp) {
+                result.add(minPoint)
+            }
+        }
+    }
+
+    return result.sortedBy { it.timestamp }
 }
 
 @Composable
