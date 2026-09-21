@@ -364,7 +364,7 @@ class MainActivity : ComponentActivity() {
             getSharedPreferences(
                 HeartRateService.PREFS,
                 MODE_PRIVATE,
-            ).getString("overlay_preset", null),
+            ).getString(HeartRateService.KEY_OVERLAY_PRESET, null),
         )
 
     companion object {
