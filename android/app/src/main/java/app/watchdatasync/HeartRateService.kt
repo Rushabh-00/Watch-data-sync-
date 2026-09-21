@@ -593,7 +593,7 @@ class HeartRateService : Service() {
         }
 
         val longGraphChanged = longGraphPoints.isEmpty() ||
-            now - (longGraphPoints.peekLast()?.timestamp ?: 0L) >= LONG_GRAPH_SAMPLE_MS
+            now - (longGraphPoints.lastOrNull()?.timestamp ?: 0L) >= LONG_GRAPH_SAMPLE_MS
 
         if (longGraphChanged) {
             longGraphPoints.addLast(HeartRatePoint(now, bpm))
