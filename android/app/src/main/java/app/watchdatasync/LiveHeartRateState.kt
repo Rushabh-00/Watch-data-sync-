@@ -26,7 +26,16 @@ data class LiveHeartRateSnapshot(
     val lowBatteryAlertEnabled: Boolean = true,
     val batteryPercent: Int? = null,
     val batteryCharging: Boolean? = null,
+    val rssi: Int? = null,
 )
+
+fun signalQualityForRssi(rssi: Int?): String = when {
+    rssi == null -> "Signal —"
+    rssi >= -55 -> "Excellent"
+    rssi >= -67 -> "Good"
+    rssi >= -80 -> "Fair"
+    else -> "Weak"
+}
 
 object LiveHeartRateState {
     private val _snapshot = MutableStateFlow(LiveHeartRateSnapshot())
