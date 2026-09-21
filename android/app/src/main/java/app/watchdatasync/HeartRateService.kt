@@ -51,6 +51,18 @@ class HeartRateService : Service() {
     private var batteryRefreshRunnable: Runnable? = null
     private var pendingTimeSyncWrite = false
     private var timeSyncRequested = false
+    private var lastStreamRecoveryAt = 0L
+
+    private data class BleWriteRequest(
+        val gatt: android.bluetooth.BluetoothGatt,
+        val payload: ByteArray,
+        val onComplete: (Boolean) -> Unit,
+    )
+
+    private val bleWriteQueue = ArrayDeque<BleWriteRequest>()
+    private var activeBleWrite: BleWriteRequest? = null
+    private var activeWriteNoResponse = false
+    private var writeTimeoutRunnable: Runnable? = null
 
     // Bounded in-memory ring buffer: never written to disk/database.
     private val graphPoints = ArrayDeque<HeartRatePoint>(MAX_GRAPH_POINTS)
@@ -235,32 +247,111 @@ class HeartRateService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendLiveCommand(
+    private fun enqueueLiveCommand(
         current: android.bluetooth.BluetoothGatt,
         payload: ByteArray,
+        onComplete: (Boolean) -> Unit = {},
     ): Boolean {
-        val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID))
-            ?: return false
-        val command = service.getCharacteristic(
-            UUID.fromString(FastrackProtocol.TIME_WRITE_UUID),
-        ) ?: return false
+        if (gatt !== current || !monitoringEnabled()) return false
 
-        val noResponse =
-            command.properties and
-                android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        bleWriteQueue.addLast(
+            BleWriteRequest(
+                gatt = current,
+                payload = payload,
+                onComplete = onComplete,
+            ),
+        )
+        pumpBleWriteQueue()
+        return true
+    }
 
-        command.writeType =
-            if (noResponse) {
-                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            } else {
-                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+    @SuppressLint("MissingPermission")
+    private fun pumpBleWriteQueue() {
+        if (activeBleWrite != null) return
+
+        val current = gatt ?: return
+        while (bleWriteQueue.isNotEmpty()) {
+            val next = bleWriteQueue.removeFirst()
+            if (next.gatt !== current || gatt !== current) {
+                next.onComplete(false)
+                continue
             }
 
-        command.value = payload
+            val service = current.getService(UUID.fromString(FastrackProtocol.SERVICE_UUID))
+            val command = service?.getCharacteristic(
+                UUID.fromString(FastrackProtocol.TIME_WRITE_UUID),
+            )
+            if (command == null) {
+                next.onComplete(false)
+                continue
+            }
 
-        return runCatching {
-            current.writeCharacteristic(command)
-        }.getOrDefault(false)
+            val canWrite = command.properties and
+                android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+            val canWriteNoResponse = command.properties and
+                android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+
+            if (!canWrite && !canWriteNoResponse) {
+                next.onComplete(false)
+                continue
+            }
+
+            activeBleWrite = next
+            activeWriteNoResponse = !canWrite
+            command.writeType = if (canWrite) {
+                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            } else {
+                android.bluetooth.BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            }
+            command.value = next.payload
+
+            val accepted = runCatching {
+                current.writeCharacteristic(command)
+            }.getOrDefault(false)
+
+            if (!accepted) {
+                completeBleWrite(false)
+                continue
+            }
+
+            val timeout = if (activeWriteNoResponse) {
+                NO_RESPONSE_WRITE_GAP_MS
+            } else {
+                WRITE_RESPONSE_TIMEOUT_MS
+            }
+
+            writeTimeoutRunnable = Runnable {
+                if (activeBleWrite?.gatt !== current) return@Runnable
+                if (activeWriteNoResponse) {
+                    completeBleWrite(true)
+                } else {
+                    completeBleWrite(false)
+                    closeGatt()
+                    scheduleReconnect()
+                }
+            }
+            handler.postDelayed(writeTimeoutRunnable!!, timeout)
+            return
+        }
+    }
+
+    private fun completeBleWrite(success: Boolean) {
+        writeTimeoutRunnable?.let(handler::removeCallbacks)
+        writeTimeoutRunnable = null
+
+        val request = activeBleWrite ?: return
+        activeBleWrite = null
+        activeWriteNoResponse = false
+        request.onComplete(success)
+        pumpBleWriteQueue()
+    }
+
+    private fun cancelBleWrites() {
+        writeTimeoutRunnable?.let(handler::removeCallbacks)
+        writeTimeoutRunnable = null
+        activeBleWrite = null
+        activeWriteNoResponse = false
+        bleWriteQueue.clear()
     }
 
     @SuppressLint("MissingPermission")
@@ -268,31 +359,37 @@ class HeartRateService : Service() {
         val current = gatt ?: return
         if (!LiveHeartRateState.snapshot.value.connected || !monitoringEnabled()) return
 
-        // Verified UTE/GloryFit-family sequence: D6 02 selects dynamic HR mode,
-        // then E5 11 starts the live E5 11 00 <bpm> stream.
-        if (!sendLiveCommand(current, FastrackProtocol.buildDynamicHeartRateModePacket())) {
-            updateStatus("Could not start dynamic heart-rate mode")
-            return
-        }
-
-        handler.postDelayed({
-            if (gatt !== current || !monitoringEnabled()) return@postDelayed
-
-            if (!sendLiveCommand(current, FastrackProtocol.buildLiveHeartRateStartPacket())) {
-                updateStatus("Could not start live heart-rate stream")
-                return@postDelayed
+        val queued = enqueueLiveCommand(
+            current,
+            FastrackProtocol.buildDynamicHeartRateModePacket(),
+        ) { success ->
+            if (!success) {
+                updateStatus("Could not start dynamic heart-rate mode")
+                return@enqueueLiveCommand
             }
 
             handler.postDelayed({
-                if (
-                    gatt === current &&
-                    monitoringEnabled() &&
-                    timeSyncRequested
-                ) {
-                    syncTimeInternal()
+                if (gatt !== current || !monitoringEnabled()) return@postDelayed
+
+                enqueueLiveCommand(
+                    current,
+                    FastrackProtocol.buildLiveHeartRateStartPacket(),
+                ) { started ->
+                    if (!started) {
+                        updateStatus("Could not start live heart-rate stream")
+                        return@enqueueLiveCommand
+                    }
+
+                    if (timeSyncRequested) {
+                        scheduleRequestedTimeSync()
+                    }
                 }
-            }, 350L)
-        }, DYNAMIC_HR_START_DELAY_MS)
+            }, DYNAMIC_HR_START_DELAY_MS)
+        }
+
+        if (!queued) {
+            updateStatus("Could not queue dynamic heart-rate mode")
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -302,18 +399,28 @@ class HeartRateService : Service() {
 
         updateStatus("Re-starting live heart-rate stream…")
 
-        if (!sendLiveCommand(current, FastrackProtocol.buildDynamicHeartRateModePacket())) {
-            refreshLiveSubscription()
-            return
-        }
-
-        handler.postDelayed({
-            if (gatt !== current || !monitoringEnabled()) return@postDelayed
-
-            if (!sendLiveCommand(current, FastrackProtocol.buildLiveHeartRateStartPacket())) {
+        enqueueLiveCommand(
+            current,
+            FastrackProtocol.buildDynamicHeartRateModePacket(),
+        ) { success ->
+            if (!success) {
                 refreshLiveSubscription()
+                return@enqueueLiveCommand
             }
-        }, DYNAMIC_HR_START_DELAY_MS)
+
+            handler.postDelayed({
+                if (gatt !== current || !monitoringEnabled()) return@postDelayed
+
+                enqueueLiveCommand(
+                    current,
+                    FastrackProtocol.buildLiveHeartRateStartPacket(),
+                ) { started ->
+                    if (!started) {
+                        refreshLiveSubscription()
+                    }
+                }
+            }, DYNAMIC_HR_START_DELAY_MS)
+        }
     }
 
     @SuppressLint("MissingPermission")
